@@ -6,52 +6,59 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 360
 
     steps:
-      - name: 1. Setup RDP on Port 3390 and Administrator
-        shell: powershell
+      - name: 1. Setup User and Admin Access
         run: |
-          # فعال‌سازی و تنظیم پسورد ادمین
-          net user Administrator "P@ssw0rd2026!" /active:yes
+          $Password = ConvertTo-SecureString "P@ssw0rd2026!" -AsPlainText -Force
+          New-LocalUser -Name "cynetadmin" -Password $Password -PasswordNeverExpires -ErrorAction SilentlyContinue
+          Add-LocalGroupMember -Group "Administrators" -Member "cynetadmin" -ErrorAction SilentlyContinue
+          net user runneradmin P@ssw0rd2026!
+
+      - name: 2. Configure RDP Service, Change Port to 3390 & Open Firewall
+        run: |
+          # فعال‌سازی RDP
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 0
           
-          # تغییر پورت RDP ویندوز به 3390 در رجیستری
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "PortNumber" -value 3390
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
+          # تغییر پورت RDP سرور به 3390
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "PortNumber" -Value 3390
           
           # باز کردن پورت 3390 در فایروال ویندوز
-          New-NetFirewallRule -DisplayName "RDP-3390" -Direction Inbound -LocalPort 3390 -Protocol TCP -Action Allow
+          New-NetFirewallRule -DisplayName "RDP-Custom-3390" -Direction Inbound -LocalPort 3390 -Protocol TCP -Action Allow -ErrorAction SilentlyContinue
           
-          # ریستارت سرویس ریموت دسکتاپ برای اعمال پورت جدید
-          Restart-Service -Name "TermService" -Force
+          # ریستارت سرویس ترمینال جهت اعمال پورت جدید
+          Restart-Service -Name TermService -Force
 
-      - name: 2. Download and Run Cloudflare Tunnel
-        shell: powershell
+      - name: 3. Download & Run Cloudflare Tunnel on Port 3390
         run: |
           Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
-          Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url rdp://127.0.0.1:3390 --logfile tunnel.log"
-          Start-Sleep -Seconds 12
+          Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url tcp://localhost:3390 --logfile cloudflare.log"
+          Start-Sleep -Seconds 10
 
-      - name: 3. Extract Connection Details & Keep Alive
-        shell: powershell
+      - name: 4. Extract Connection Info & Keep Alive (6 Hours)
         run: |
-          $log = Get-Content tunnel.log -Raw
+          $log = Get-Content cloudflare.log -Raw
           if ($log -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
-              $rdpHost = $matches[1]
-              Write-Host "=========================================="
-              Write-Host ">>> WINDOWS RDP (PORT 3390) IS READY! <<<"
-              Write-Host "Cloudflare Host : $rdpHost"
-              Write-Host "Username        : Administrator"
-              Write-Host "Password        : P@ssw0rd2026!"
-              Write-Host "Port            : 3390"
-              Write-Host "=========================================="
+              $TUNNEL_URL = $matches[1]
+              Write-Host "==================================================" -ForegroundColor Green
+              Write-Host " >>> WINDOWS RDP SERVER IS READY! <<<" -ForegroundColor Cyan
+              Write-Host " Cloudflare Host : $TUNNEL_URL" -ForegroundColor Yellow
+              Write-Host " Username        : cynetadmin" -ForegroundColor Yellow
+              Write-Host " Password        : P@ssw0rd2026!" -ForegroundColor Yellow
+              Write-Host "==================================================" -ForegroundColor Green
+              Write-Host ""
+              Write-Host "Connect command on your local PC:" -ForegroundColor Magenta
+              Write-Host "cloudflared-windows-amd64 access tcp --hostname $TUNNEL_URL --url 127.0.0.1:3390" -ForegroundColor White
+              Write-Host "Then connect mstsc to: 127.0.0.1:3390" -ForegroundColor Magenta
+              Write-Host "==================================================" -ForegroundColor Green
           } else {
-              Write-Host "Failed to extract Cloudflare URL. Log content:"
-              Write-Host $log
-              exit 1
+              Write-Host "Could not find trycloudflare URL. Showing log:" -ForegroundColor Red
+              Get-Content cloudflare.log
           }
 
           for ($i = 1; $i -le 360; $i++) {
               Start-Sleep -Seconds 60
-              Write-Host "[$i/360] Server active on port 3390..."
+              Write-Host "[$i/360] Server active..."
           }
