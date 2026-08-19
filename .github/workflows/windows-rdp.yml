@@ -1,0 +1,57 @@
+name: Windows RDP via Cloudflare Tunnel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: 1. Setup RDP on Port 3390 and Administrator
+        shell: powershell
+        run: |
+          # فعال‌سازی و تنظیم پسورد ادمین
+          net user Administrator "P@ssw0rd2026!" /active:yes
+          
+          # تغییر پورت RDP ویندوز به 3390 در رجیستری
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "PortNumber" -value 3390
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -value 0
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -value 0
+          
+          # باز کردن پورت 3390 در فایروال ویندوز
+          New-NetFirewallRule -DisplayName "RDP-3390" -Direction Inbound -LocalPort 3390 -Protocol TCP -Action Allow
+          
+          # ریستارت سرویس ریموت دسکتاپ برای اعمال پورت جدید
+          Restart-Service -Name "TermService" -Force
+
+      - name: 2. Download and Run Cloudflare Tunnel
+        shell: powershell
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "cloudflared.exe"
+          Start-Process -FilePath ".\cloudflared.exe" -ArgumentList "tunnel --url rdp://127.0.0.1:3390 --logfile tunnel.log"
+          Start-Sleep -Seconds 12
+
+      - name: 3. Extract Connection Details & Keep Alive
+        shell: powershell
+        run: |
+          $log = Get-Content tunnel.log -Raw
+          if ($log -match 'https://([a-zA-Z0-9-]+\.trycloudflare\.com)') {
+              $rdpHost = $matches[1]
+              Write-Host "=========================================="
+              Write-Host ">>> WINDOWS RDP (PORT 3390) IS READY! <<<"
+              Write-Host "Cloudflare Host : $rdpHost"
+              Write-Host "Username        : Administrator"
+              Write-Host "Password        : P@ssw0rd2026!"
+              Write-Host "Port            : 3390"
+              Write-Host "=========================================="
+          } else {
+              Write-Host "Failed to extract Cloudflare URL. Log content:"
+              Write-Host $log
+              exit 1
+          }
+
+          for ($i = 1; $i -le 360; $i++) {
+              Start-Sleep -Seconds 60
+              Write-Host "[$i/360] Server active on port 3390..."
+          }
