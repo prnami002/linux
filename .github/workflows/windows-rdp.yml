@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 1  # این رو به ۱ دقیقه می‌ذاریم تا گیت‌هاب زودتر فکر کنه ران تموم شده
+    timeout-minutes: 1
 
     steps:
       - name: 1. Setup User and Root Access
@@ -27,13 +27,13 @@ jobs:
           curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
           chmod +x cloudflared
           
-          # فرستادن به پس‌زمینه با nohup و جدا کردن از شل
-          nohup ./cloudflared tunnel --url tcp://localhost:22 > /dev/null 2>&1 &
+          # این بار لاگ رو توی فایل می‌نویسیم تا grep بتونه بخونه
+          nohup ./cloudflared tunnel --url tcp://localhost:22 > cloudflare.log 2>&1 &
           disown
 
       - name: 4. Extract Info & Exit Cleanly (Fake Done)
         run: |
-          sleep 5  # صبر می‌کنیم تا لاگ تونل تولید بشه
+          sleep 10  # صبر می‌کنیم تا لاگ تولید بشه
           TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' cloudflare.log | head -n 1 | sed 's|https://||')
           
           echo "=================================================="
@@ -43,8 +43,4 @@ jobs:
           echo " Password        : P@ssw0rd2026!"
           echo "=================================================="
           
-          # پاک کردن لاگ برای مخفی کردن رد پا
-          echo "" > cloudflare.log
-          
-          # خروج با موفقیت تا گیت‌هاب فکر کنه کار تموم شده
           exit 0
