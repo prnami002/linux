@@ -22,18 +22,25 @@ jobs:
           sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo systemctl restart ssh
 
+      - name: 2.5. Force SSH to Listen on 0.0.0.0
+        run: |
+          sudo systemctl stop ssh
+          sudo sed -i 's/^#Port 22/Port 22/' /etc/ssh/sshd_config
+          sudo sed -i 's/^#ListenAddress 0.0.0.0/ListenAddress 0.0.0.0/' /etc/ssh/sshd_config
+          sudo systemctl start ssh
+          echo "=== Checking port 22 ==="
+          sudo netstat -tulpn | grep :22 || echo "Port 22 not listening!"
+
       - name: 3. Download & Run Cloudflare Tunnel (Background)
         run: |
           curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
           chmod +x cloudflared
-          
-          # این بار لاگ رو توی فایل می‌نویسیم تا grep بتونه بخونه
           nohup ./cloudflared tunnel --url tcp://localhost:22 > cloudflare.log 2>&1 &
           disown
 
       - name: 4. Extract Info & Exit Cleanly (Fake Done)
         run: |
-          sleep 10  # صبر می‌کنیم تا لاگ تولید بشه
+          sleep 10
           TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' cloudflare.log | head -n 1 | sed 's|https://||')
           
           echo "=================================================="
