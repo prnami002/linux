@@ -1,4 +1,4 @@
-name: Linux SSH via Cloudflare Tunnel (Persistence)
+name: Linux SSH via Cloudflare Tunnel
 
 on:
   workflow_dispatch:
@@ -6,7 +6,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 360
 
     steps:
       - name: 1. Setup User and Root Access
@@ -22,25 +22,24 @@ jobs:
           sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo systemctl restart ssh
 
-      - name: 3. Download & Run Cloudflare Tunnel (Background)
+      - name: 3. Download & Run Cloudflare Tunnel
         run: |
           curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
           chmod +x cloudflared
-          
-          # این بار لاگ رو توی فایل می‌نویسیم تا grep بتونه بخونه
           nohup ./cloudflared tunnel --url tcp://localhost:22 > cloudflare.log 2>&1 &
-          disown
+          sleep 10
 
-      - name: 4. Extract Info & Exit Cleanly (Fake Done)
+      - name: 4. Extract Connection Info & Keep Alive (6 Hours)
         run: |
-          sleep 10  # صبر می‌کنیم تا لاگ تولید بشه
           TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' cloudflare.log | head -n 1 | sed 's|https://||')
-          
           echo "=================================================="
-          echo " >>> TUNNEL IS ALIVE IN BACKGROUND <<<"
+          echo " >>> LINUX SSH SERVER IS READY! <<<"
           echo " Cloudflare Host : $TUNNEL_URL"
           echo " Username        : prxcore"
           echo " Password        : P@ssw0rd2026!"
           echo "=================================================="
           
-          exit 0
+          for i in {1..360}; do
+            sleep 60
+            echo "[$i/360] Server active..."
+          done
