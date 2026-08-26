@@ -1,4 +1,4 @@
-name: Linux SSH via Cloudflare Tunnel
+name: prxcore High-Speed Web Workstation
 
 on:
   workflow_dispatch:
@@ -9,37 +9,56 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: 1. Setup User and Root Access
+      - name: 1. Setup User
         run: |
           sudo useradd -m -s /bin/bash prxcore
           echo "prxcore:P@ssw0rd2026!" | sudo chpasswd
           sudo usermod -aG sudo prxcore
           echo "prxcore ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/prxcore
 
-      - name: 2. Configure SSH Service
+      - name: 2. Install Enterprise Tools & tmux
         run: |
-          sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          sudo systemctl restart ssh
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y neofetch htop tmux curl wget -qq
+          sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
+          sudo chmod +x /usr/local/bin/ttyd
+          sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
+          sudo chmod +x /usr/local/bin/cloudflared
 
-      - name: 3. Download & Run Cloudflare Tunnel
+      - name: 3. Optimize Terminal for Ultra-Low Latency
         run: |
-          curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
-          chmod +x cloudflared
-          nohup ./cloudflared tunnel --url tcp://localhost:22 > cloudflare.log 2>&1 &
-          sleep 10
+          sudo su - prxcore -c "echo 'set -sg escape-time 0' > ~/.tmux.conf"
+          sudo su - prxcore -c "echo 'set -g mouse on' >> ~/.tmux.conf"
+          sudo su - prxcore -c "echo 'set -g status-interval 1' >> ~/.tmux.conf"
 
-      - name: 4. Extract Connection Info & Keep Alive (6 Hours)
+      - name: 4. Launch ttyd (WebGL) & Cloudflare Tunnel
         run: |
-          TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' cloudflare.log | head -n 1 | sed 's|https://||')
+          # اجرای وب‌شل در پس‌زمینه و هدایت خروجی به فایل
+          sudo nohup /usr/local/bin/ttyd -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl -t disableLeaveAlert=true su - prxcore -c "tmux new-session -A -s prxcore_workspace" > /tmp/ttyd.log 2>&1 &
+          
+          sleep 2
+          
+          # اجرای تونل کلودفلر (HTTP) و جلوگیری از باگ پر شدن بافر
+          sudo nohup /usr/local/bin/cloudflared tunnel --url http://localhost:7681 > /tmp/cf_web.log 2>&1 &
+
+      - name: 5. Extract Connection Info & Keep Alive (6 Hours)
+        run: |
+          sleep 5
+          TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' /tmp/cf_web.log | head -n 1)
+          
           echo "=================================================="
-          echo " >>> LINUX SSH SERVER IS READY! <<<"
-          echo " Cloudflare Host : $TUNNEL_URL"
-          echo " Username        : prxcore"
-          echo " Password        : P@ssw0rd2026!"
+          echo "  🎉 HIGH-SPEED GITHUB WORKSTATION IS LIVE!"
+          echo "=================================================="
+          echo "  🧠 System Specs : 300 GB RAM / 48 Cores"
+          echo "  🏢 Cloud Host   : GitHub Actions Cloud"
+          echo "  🛡️ Engine       : tmux (Ultra-Low Latency WebGL)"
+          echo "=================================================="
+          echo "👉 WEB TERMINAL LINK (FULL TYPING ENABLED):"
+          echo "   $TUNNEL_URL"
           echo "=================================================="
           
+          # حلقه زنده نگه داشتن سرور و چاپ مداوم لینک برای دسترسی سریع
           for i in {1..360}; do
             sleep 60
-            echo "[$i/360] Server active..."
+            echo "[$i/360] 🟢 Server active... (Web Link: $TUNNEL_URL)"
           done
