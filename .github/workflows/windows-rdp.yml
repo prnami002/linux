@@ -33,12 +33,12 @@ jobs:
 
       - name: 4. Launch ttyd (WebGL) & Cloudflare Tunnel
         run: |
-          # اجرای وب‌شل در پس‌زمینه و هدایت خروجی به فایل
-          sudo nohup /usr/local/bin/ttyd -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl -t disableLeaveAlert=true su - prxcore -c "tmux new-session -A -s prxcore_workspace" > /tmp/ttyd.log 2>&1 &
+          # اجرای مستقیم وب‌شل با کاربر prxcore برای رفع باگ صفحه خالی (PTY Drop)
+          sudo -u prxcore nohup /usr/local/bin/ttyd -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl -t disableLeaveAlert=true tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           
           sleep 2
           
-          # اجرای تونل کلودفلر (HTTP) و جلوگیری از باگ پر شدن بافر
+          # اجرای تونل کلودفلر (HTTP)
           sudo nohup /usr/local/bin/cloudflared tunnel --url http://localhost:7681 > /tmp/cf_web.log 2>&1 &
 
       - name: 5. Extract Connection Info & Keep Alive (6 Hours)
