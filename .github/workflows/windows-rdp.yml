@@ -556,9 +556,9 @@ jobs:
           echo "$VLESS_LINK"
           echo ""
 
-          # تولید QR Code
-          echo "📱 QR Code:"
-          qrencode -t ANSIUTF8 "$VLESS_LINK" 2>/dev/null || echo "(qrencode not available)"
+          # ⚠️ QR Code حذف شد — دلیل: روی ریپوی عمومی گیت‌هاب نمی‌تونه ماسک بشه
+          # اگه ریپوت Private هست و می‌خوای QR داشته باشی، خط زیر رو از کامنت دربیار:
+          # qrencode -t ANSIUTF8 "$VLESS_LINK" 2>/dev/null || echo "(qrencode not available)"
 
           echo ""
           echo "⏱️ سرور تا ۶ ساعت فعال می‌ماند..."
