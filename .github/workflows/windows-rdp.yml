@@ -139,14 +139,52 @@ jobs:
 
           sudo systemctl restart nginx
 
-      - name: 5. Launch Services & Dedicated Cloudflare Tunnel (QUIC Protocol)
+      - name: 5. Launch Services & Smart Cloudflare Tunnel (Auto-Fallback)
         run: |
           # اجرای وب‌ترمینال محافظت‌شده با احراز هویت
           sudo nohup /usr/local/bin/ttyd -c "prxcore:$PRX_USER_PASS" -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # اجرای رسمی تونل کلودفلر با اتصال مستقیم به پورت 8000
-          sudo nohup /usr/local/bin/cloudflared tunnel --protocol quic --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+          # شروع تونل با QUIC (سریع‌ترین پروتکل)
+          CURRENT_PROTO="quic"
+          sudo nohup /usr/local/bin/cloudflared tunnel --protocol $CURRENT_PROTO --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+          CF_PID=$!
+          sleep 5
+
+          # اسکریپت مانیتورینگ هوشمند — سوئیچ خودکار از QUIC به HTTP/2
+          cat <<'MONITOR' | sudo tee /usr/local/bin/tunnel_monitor.sh > /dev/null
+          #!/bin/bash
+          ERROR_THRESHOLD=5
+          CHECK_INTERVAL=30
+          ERROR_COUNT=0
+
+          while true; do
+            sleep $CHECK_INTERVAL
+
+            # بررسی ارورهای مرتبط با QUIC در لاگ تونل
+            RECENT_ERRORS=$(tail -50 /tmp/cf_tunnel.log 2>/dev/null | grep -ciE "EOF|stream error|timeout|connection reset|quic.*error")
+
+            if [ "$RECENT_ERRORS" -ge "$ERROR_THRESHOLD" ]; then
+              CURRENT=$(cat /tmp/cf_proto.txt 2>/dev/null || echo "quic")
+              if [ "$CURRENT" = "quic" ]; then
+                echo "$(date) ⚠️ QUIC ناپایدار — سوئیچ به HTTP/2..." >> /tmp/tunnel_monitor.log
+
+                # کشتن تونل QUIC و ریستارت با HTTP/2
+                sudo pkill -f cloudflared
+                sleep 2
+                echo "http2" > /tmp/cf_proto.txt
+                sudo nohup /usr/local/bin/cloudflared tunnel --protocol http2 --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+
+                echo "$(date) ✅ تونل با HTTP/2 ریستارت شد" >> /tmp/tunnel_monitor.log
+              fi
+            fi
+          done
+          MONITOR
+          sudo chmod +x /usr/local/bin/tunnel_monitor.sh
+          echo "quic" > /tmp/cf_proto.txt
+
+          # اجرای مانیتور در پس‌زمینه
+          sudo nohup /usr/local/bin/tunnel_monitor.sh > /dev/null 2>&1 &
 
       - name: 6. Live Display & 6-Hour Keep Alive
         run: |
