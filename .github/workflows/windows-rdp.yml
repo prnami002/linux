@@ -9,11 +9,13 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: 1. System & Network Tuning (BBR)
+      - name: 1. System & Network Tuning (BBR & Low Latency)
         run: |
           sudo sysctl -w net.core.default_qdisc=fq
           sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
           sudo sysctl -w net.ipv4.tcp_fastopen=3
+          sudo sysctl -w net.ipv4.tcp_low_latency=1
+          sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0
 
       - name: 2. Setup User & Install Dependencies
         run: |
@@ -25,13 +27,13 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y neofetch htop tmux curl wget nginx qrencode -qq
 
-          # نصب ttyd و cloudflared
+          # دانلود و نصب ttyd و cloudflared
           sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
           sudo chmod +x /usr/local/bin/ttyd
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-      - name: 3. Install & Configure Xray-Core
+      - name: 3. Install & Configure Xray-Core (Optimized WS + Heartbeat)
         run: |
           sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
@@ -59,7 +61,8 @@ jobs:
                 "streamSettings": {
                   "network": "ws",
                   "wsSettings": {
-                    "path": "/prx-stream"
+                    "path": "/prx-stream",
+                    "heartbeatPeriod": 20
                   }
                 }
               }
@@ -114,7 +117,7 @@ jobs:
 
           sudo systemctl restart nginx
 
-      - name: 5. Launch Services & Dedicated Cloudflare Tunnel
+      - name: 5. Launch Services & Dedicated Cloudflare Tunnel (QUIC Protocol)
         env:
           CF_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
         run: |
@@ -122,15 +125,15 @@ jobs:
           sudo -u prxcore nohup /usr/local/bin/ttyd -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # اتصال تونل دامنه اختصاصی به پورت تجمیعی 8000
-          sudo nohup /usr/local/bin/cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+          # اجرای رسمی تونل کلودفلر با پروتکل فوق‌سریع QUIC
+          sudo nohup /usr/local/bin/cloudflared tunnel --protocol quic --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
 
       - name: 6. Live Display & 6-Hour Keep Alive
         run: |
           VLESS_LINK="vless://${{ env.CLIENT_UUID }}@edge.prnamilab.shop:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=edge.prnamilab.shop&host=edge.prnamilab.shop#PRX-Dedicated"
 
           echo "=================================================="
-          echo "🎉 ALL SERVICES ARE RUNNING AUTOMATICALLY!"
+          echo "🎉 ALL SERVICES ARE RUNNING WITH QUIC & HEARTBEAT!"
           echo "=================================================="
           echo "🌐 PERMANENT WEB TERMINAL: https://edge.prnamilab.shop"
           echo "=================================================="
