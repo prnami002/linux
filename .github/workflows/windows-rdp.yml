@@ -46,36 +46,10 @@ jobs:
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-      - name: 3. Install & Configure Xray-Core (Direct Fast Install)
+      - name: 3. Install & Configure Xray-Core (Optimized WS + Default DNS Strategy)
         run: |
-          # دانلود و استخراج مستقیم باینری Xray بدون وابستگی به API
-          mkdir -p /tmp/xray
-          cd /tmp/xray
-          wget -q https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -O xray.zip
-          unzip -qo xray.zip
-          sudo mv xray /usr/local/bin/xray
-          sudo chmod +x /usr/local/bin/xray
-          sudo mkdir -p /usr/local/share/xray
-          sudo mv geoip.dat geosite.dat /usr/local/share/xray/ 2>/dev/null || true
+          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
-          # ساخت سرویس استاندارد لینوکس برای اجرای پایدار Xray
-          cat <<EOF | sudo tee /etc/systemd/system/xray.service
-          [Unit]
-          Description=Xray Service
-          After=network.target
-
-          [Service]
-          ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
-          Restart=on-failure
-          RestartPreventExitStatus=23
-          LimitNPROC=10000
-          LimitNOFILE=1000000
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-
-          # ساخت فایل کانفیگ Xray
           sudo mkdir -p /usr/local/etc/xray
           cat <<EOF | sudo tee /usr/local/etc/xray/config.json
           {
@@ -123,7 +97,6 @@ jobs:
           }
           EOF
 
-          sudo systemctl daemon-reload
           sudo systemctl enable xray
           sudo systemctl restart xray
 
