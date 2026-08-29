@@ -15,7 +15,7 @@ jobs:
       PRX_USER_PASS: ${{ secrets.PRX_USER_PASS }}
 
     steps:
-      - name: 1. Validate Secrets
+      - name: 1. Validate Secrets & Kernel Network Tuning (BBR & FastOpen)
         run: |
           if [ -z "$CF_TOKEN" ] || [ -z "$PRX_DOMAIN" ] || [ -z "$PRX_UUID" ] || [ -z "$PRX_USER_PASS" ]; then
             echo "❌ خطا: لطفاً مطمئن شوید تمام سکرت‌ها (CF_TUNNEL_TOKEN, PRX_DOMAIN, PRX_UUID, PRX_USER_PASS) در تنظیمات گیت‌هاب تعریف شده‌اند."
@@ -67,7 +67,6 @@ jobs:
                     "heartbeatPeriod": 20
                   },
                   "sockopt": {
-                    "tcpFastOpen": true,
                     "tcpKeepAliveInterval": 15
                   }
                 }
@@ -78,11 +77,6 @@ jobs:
                 "protocol": "freedom",
                 "settings": {
                   "domainStrategy": "AsIs"
-                },
-                "streamSettings": {
-                  "sockopt": {
-                    "tcpFastOpen": true
-                  }
                 }
               }
             ]
@@ -131,14 +125,70 @@ jobs:
 
           sudo systemctl restart nginx
 
-      - name: 5. Launch Services & Dedicated Cloudflare Tunnel (HTTP/2 - TCP)
+      - name: 5. Launch Services & Smart Cloudflare Tunnel (Auto-Fallback)
         run: |
           # اجرای وب‌ترمینال محافظت‌شده با احراز هویت
           sudo nohup /usr/local/bin/ttyd -c "prxcore:$PRX_USER_PASS" -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # اجرای مستقیم تونل کلودفلر با پروتکل HTTP/2 (اتصال مستقیم TCP)
-          sudo nohup /usr/local/bin/cloudflared tunnel --protocol http2 --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+          # شروع تونل با QUIC (سریع‌ترین پروتکل)
+          CURRENT_PROTO="quic"
+          sudo nohup /usr/local/bin/cloudflared tunnel --protocol $CURRENT_PROTO --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+          CF_PID=$!
+          sleep 5
+
+          # اسکریپت مانیتورینگ هوشمند — سوئیچ خودکار از QUIC به HTTP/2
+          cat <<'MONITOR' | sudo tee /usr/local/bin/tunnel_monitor.sh > /dev/null
+          #!/bin/bash
+          ERROR_THRESHOLD=5
+          CHECK_INTERVAL=30
+          ERROR_COUNT=0
+
+          while true; do
+            sleep $CHECK_INTERVAL
+
+            # بررسی ارورهای مرتبط با تونل در لاگ
+            RECENT_ERRORS=$(tail -50 /tmp/cf_tunnel.log 2>/dev/null | grep -ciE "EOF|stream error|timeout|connection reset|quic.*error|http2.*error")
+
+            if [ "$RECENT_ERRORS" -ge "$ERROR_THRESHOLD" ]; then
+              CURRENT=$(cat /tmp/cf_proto.txt 2>/dev/null || echo "quic")
+
+              # تعیین پروتکل جایگزین
+              if [ "$CURRENT" = "quic" ]; then
+                NEXT="http2"
+              else
+                NEXT="quic"
+              fi
+
+              echo "$(date) ⚠️ $CURRENT ناپایدار — شروع Hot-Swap به $NEXT..." >> /tmp/tunnel_monitor.log
+
+              # ذخیره PID تونل فعلی
+              OLD_PID=$(pgrep -f "cloudflared tunnel")
+
+              # اول تونل جدید رو بالا بیار (بدون کشتن قبلی)
+              sudo nohup /usr/local/bin/cloudflared tunnel --protocol $NEXT --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel_new.log 2>&1 &
+              NEW_PID=$!
+
+              # صبر تا تونل جدید آماده بشه
+              sleep 8
+
+              # حالا تونل قدیمی رو بکش
+              if [ -n "$OLD_PID" ]; then
+                sudo kill "$OLD_PID" 2>/dev/null
+              fi
+
+              echo "$NEXT" > /tmp/cf_proto.txt
+              sudo cp /tmp/cf_tunnel_new.log /tmp/cf_tunnel.log
+
+              echo "$(date) ✅ Hot-Swap کامل شد — $NEXT فعال (بدون قطعی)" >> /tmp/tunnel_monitor.log
+            fi
+          done
+          MONITOR
+          sudo chmod +x /usr/local/bin/tunnel_monitor.sh
+          echo "quic" > /tmp/cf_proto.txt
+
+          # اجرای مانیتور در پس‌زمینه
+          sudo nohup /usr/local/bin/tunnel_monitor.sh > /dev/null 2>&1 &
 
       - name: 6. Live Display & 6-Hour Keep Alive
         run: |
