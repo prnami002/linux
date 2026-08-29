@@ -1,4 +1,4 @@
-name: prxcore All-in-One Dedicated Workstation & Proxy (Secure Edition)
+name: prxcore All-in-One Dedicated Workstation & Proxy (Ultra Edition)
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
       PRX_USER_PASS: ${{ secrets.PRX_USER_PASS }}
 
     steps:
-      - name: 1. Validate Secrets & Tune Kernel (BBR & Low Latency)
+      - name: 1. Validate Secrets & Kernel Network Tuning (BBR & TCP Buffers)
         run: |
           if [ -z "$CF_TOKEN" ] || [ -z "$PRX_DOMAIN" ] || [ -z "$PRX_UUID" ] || [ -z "$PRX_USER_PASS" ]; then
             echo "❌ خطا: لطفاً مطمئن شوید تمام سکرت‌ها (CF_TUNNEL_TOKEN, PRX_DOMAIN, PRX_UUID, PRX_USER_PASS) در تنظیمات گیت‌هاب تعریف شده‌اند."
@@ -40,13 +40,13 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y neofetch htop tmux curl wget nginx qrencode -qq
 
-          # دانلود و نصب آخرین نسخه ttyd و cloudflared
+          # دانلود آخرین نسخه ttyd و cloudflared
           sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
           sudo chmod +x /usr/local/bin/ttyd
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-      - name: 3. Install & Configure Xray-Core (Optimized WS + Heartbeat)
+      - name: 3. Install & Configure Xray-Core (Optimized WS + SockOpt + UseIPv4)
         run: |
           sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
@@ -73,6 +73,10 @@ jobs:
                   "wsSettings": {
                     "path": "/prx-stream",
                     "heartbeatPeriod": 20
+                  },
+                  "sockopt": {
+                    "tcpFastOpen": true,
+                    "tcpKeepAliveInterval": 15
                   }
                 }
               }
@@ -81,7 +85,12 @@ jobs:
               {
                 "protocol": "freedom",
                 "settings": {
-                  "domainStrategy": "UseIP"
+                  "domainStrategy": "UseIPv4"
+                },
+                "streamSettings": {
+                  "sockopt": {
+                    "tcpFastOpen": true
+                  }
                 }
               }
             ]
@@ -99,7 +108,7 @@ jobs:
               server_name _;
               client_max_body_size 0;
 
-              # مسیر اختصاصی ترافیک پروکسی VLESS
+              # مسیر اختصاصی ترافیک پروکسی VLESS WS
               location /prx-stream {
                   proxy_redirect off;
                   proxy_pass http://127.0.0.1:8080;
@@ -114,7 +123,7 @@ jobs:
                   proxy_send_timeout 86400s;
               }
 
-              # مسیر دسترسی به وب‌ترمینال با احراز هویت
+              # مسیر دسترسی به وب‌ترمینال ایمن
               location / {
                   proxy_pass http://127.0.0.1:7681;
                   proxy_http_version 1.1;
@@ -132,17 +141,17 @@ jobs:
 
       - name: 5. Launch Services & Dedicated Cloudflare Tunnel (QUIC Protocol)
         run: |
-          # اجرای وب‌ترمینال با قفل امنیتی نام‌کاربری و پسورد
+          # اجرای وب‌ترمینال محافظت‌شده با احراز هویت
           sudo nohup /usr/local/bin/ttyd -c "prxcore:$PRX_USER_PASS" -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # اجرای رسمی تونل کلودفلر با پروتکل QUIC
+          # اجرای تونل رسمی کلودفلر با پروتکل QUIC
           sudo nohup /usr/local/bin/cloudflared tunnel --protocol quic --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
 
       - name: 6. Live Display & 6-Hour Keep Alive
         run: |
           echo "=================================================="
-          echo "🎉 SECURE PUBLIC WORKSTATION & PROXY IS RUNNING!"
+          echo "🎉 ULTRA WORKSTATION & SECURE PROXY IS RUNNING!"
           echo "=================================================="
           echo "🌐 Web Terminal URL: https://$PRX_DOMAIN"
           echo "🔐 Terminal Login: Username: prxcore | Password: [Protected by Secrets]"
@@ -153,5 +162,5 @@ jobs:
 
           for i in {1..360}; do
             sleep 60
-            echo "[$i/360] 🟢 Server running securely on $PRX_DOMAIN"
+            echo "[$i/360] 🟢 Server running smoothly on $PRX_DOMAIN"
           done
