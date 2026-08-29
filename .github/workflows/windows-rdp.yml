@@ -197,7 +197,7 @@ jobs:
 
           # اجرای مانیتور در پس‌زمینه
           sudo nohup /usr/local/bin/tunnel_monitor.sh > /dev/null 2>&1 &
-           - name: 6. Live Display & 6-Hour Keep Alive
+      - name: 6. Live Display & 6-Hour Keep Alive
         run: |
           echo "=================================================="
           echo "🎉 ULTRA WORKSTATION & SECURE PROXY IS RUNNING!"
