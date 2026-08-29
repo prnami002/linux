@@ -1,4 +1,4 @@
-[8/29/2026 5:58 PM] pr: name: prxcore All-in-One Dedicated Workstation & Proxy (Ultra Edition)
+name: prxcore All-in-One Dedicated Workstation & Proxy (Ultra Edition)
 
 on:
   workflow_dispatch:
@@ -112,7 +112,7 @@ jobs:
               location /prx-stream {
                   proxy_redirect off;
                   proxy_pass http://127.0.0.1:8080;
-[8/29/2026 5:58 PM] pr: proxy_http_version 1.1;
+                  proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection "upgrade";
                   proxy_set_header Host $host;
@@ -197,7 +197,7 @@ jobs:
 
           # اجرای مانیتور در پس‌زمینه
           sudo nohup /usr/local/bin/tunnel_monitor.sh > /dev/null 2>&1 &
-[8/29/2026 5:58 PM] pr: - name: 6. Live Display & 6-Hour Keep Alive
+           - name: 6. Live Display & 6-Hour Keep Alive
         run: |
           echo "=================================================="
           echo "🎉 ULTRA WORKSTATION & SECURE PROXY IS RUNNING!"
