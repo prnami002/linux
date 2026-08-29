@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: 1. Validate Secrets & Kernel Network Tuning (BBR & TCP Buffers)
         run: |
-          if [ -z "$CF_TOKEN" ]  [ -z "$PRX_DOMAIN" ]  [ -z "$PRX_UUID" ]  [ -z "$PRX_USER_PASS" ]; then
+          if [ -z "$CF_TOKEN" ] || [ -z "$PRX_DOMAIN" ] || [ -z "$PRX_UUID" ] || [ -z "$PRX_USER_PASS" ]; then
             echo "❌ خطا: لطفاً مطمئن شوید تمام سکرت‌ها (CF_TUNNEL_TOKEN, PRX_DOMAIN, PRX_UUID, PRX_USER_PASS) در تنظیمات گیت‌هاب تعریف شده‌اند."
             exit 1
           fi
@@ -161,34 +161,40 @@ jobs:
           while true; do
             sleep $CHECK_INTERVAL
 
-            # بررسی ارورهای مرتبط با QUIC در لاگ تونل
-            RECENT_ERRORS=$(tail -50 /tmp/cf_tunnel.log 2>/dev/null | grep -ciE "EOF|stream error|timeout|connection reset|quic.*error")
+            # بررسی ارورهای مرتبط با تونل در لاگ
+            RECENT_ERRORS=$(tail -50 /tmp/cf_tunnel.log 2>/dev/null | grep -ciE "EOF|stream error|timeout|connection reset|quic.*error|http2.*error")
 
             if [ "$RECENT_ERRORS" -ge "$ERROR_THRESHOLD" ]; then
-              CURRENT=$(cat /tmp/cf_proto.txt 2>/dev/null  echo "quic")
+              CURRENT=$(cat /tmp/cf_proto.txt 2>/dev/null || echo "quic")
+
+              # تعیین پروتکل جایگزین
               if [ "$CURRENT" = "quic" ]; then
-                echo "$(date) ⚠️ QUIC ناپایدار — شروع Hot-Swap به HTTP/2..." >> /tmp/tunnel_monitor.log
-
-                # ذخیره PID تونل فعلی QUIC
-                OLD_PID=$(pgrep -f "cloudflared tunnel")
-
-                # اول تونل HTTP/2 جدید رو بالا بیار (بدون کشتن قبلی)
-                sudo nohup /usr/local/bin/cloudflared tunnel --protocol http2 --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel_http2.log 2>&1 &
-                NEW_PID=$!
-
-                # صبر تا تونل جدید آماده بشه
-                sleep 8
-
-                # حالا تونل QUIC قدیمی رو بکش
-                if [ -n "$OLD_PID" ]; then
-                  sudo kill "$OLD_PID" 2>/dev/null
-                fi
-
-                echo "http2" > /tmp/cf_proto.txt
-                sudo cp /tmp/cf_tunnel_http2.log /tmp/cf_tunnel.log
-
-                echo "$(date) ✅ Hot-Swap کامل شد — HTTP/2 فعال (بدون قطعی)" >> /tmp/tunnel_monitor.log
+                NEXT="http2"
+              else
+                NEXT="quic"
               fi
+
+              echo "$(date) ⚠️ $CURRENT ناپایدار — شروع Hot-Swap به $NEXT..." >> /tmp/tunnel_monitor.log
+
+              # ذخیره PID تونل فعلی
+              OLD_PID=$(pgrep -f "cloudflared tunnel")
+
+              # اول تونل جدید رو بالا بیار (بدون کشتن قبلی)
+              sudo nohup /usr/local/bin/cloudflared tunnel --protocol $NEXT --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel_new.log 2>&1 &
+              NEW_PID=$!
+
+              # صبر تا تونل جدید آماده بشه
+              sleep 8
+
+              # حالا تونل قدیمی رو بکش
+              if [ -n "$OLD_PID" ]; then
+                sudo kill "$OLD_PID" 2>/dev/null
+              fi
+
+              echo "$NEXT" > /tmp/cf_proto.txt
+              sudo cp /tmp/cf_tunnel_new.log /tmp/cf_tunnel.log
+
+              echo "$(date) ✅ Hot-Swap کامل شد — $NEXT فعال (بدون قطعی)" >> /tmp/tunnel_monitor.log
             fi
           done
           MONITOR
@@ -197,6 +203,7 @@ jobs:
 
           # اجرای مانیتور در پس‌زمینه
           sudo nohup /usr/local/bin/tunnel_monitor.sh > /dev/null 2>&1 &
+
       - name: 6. Live Display & 6-Hour Keep Alive
         run: |
           echo "=================================================="
