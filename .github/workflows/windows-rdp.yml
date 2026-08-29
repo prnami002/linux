@@ -141,12 +141,12 @@ jobs:
 
       - name: 5. Launch Services & Dedicated Cloudflare Tunnel (QUIC Protocol)
         run: |
-          # اجرای وب‌ترمینال محافظت‌شده با احراز هویت
+          # اجرای وب‌ترمینال با احراز هویت
           sudo nohup /usr/local/bin/ttyd -c "prxcore:$PRX_USER_PASS" -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # اجرای تونل رسمی کلودفلر با پروتکل QUIC
-          sudo nohup /usr/local/bin/cloudflared tunnel --protocol quic --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+          # اجرای استاندارد تونل با پروتکل QUIC
+          sudo nohup /usr/local/bin/cloudflared tunnel --protocol quic --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
 
       - name: 6. Live Display & 6-Hour Keep Alive
         run: |
