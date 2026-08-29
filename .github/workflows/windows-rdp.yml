@@ -15,16 +15,12 @@ jobs:
       PRX_USER_PASS: ${{ secrets.PRX_USER_PASS }}
 
     steps:
-      - name: 1. Validate Secrets & Kernel Network Tuning (BBR & FastOpen)
+      - name: 1. Validate Secrets
         run: |
           if [ -z "$CF_TOKEN" ] || [ -z "$PRX_DOMAIN" ] || [ -z "$PRX_UUID" ] || [ -z "$PRX_USER_PASS" ]; then
             echo "❌ خطا: لطفاً مطمئن شوید تمام سکرت‌ها (CF_TUNNEL_TOKEN, PRX_DOMAIN, PRX_UUID, PRX_USER_PASS) در تنظیمات گیت‌هاب تعریف شده‌اند."
             exit 1
           fi
-
-          sudo sysctl -w net.core.default_qdisc=fq
-          sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
-          sudo sysctl -w net.ipv4.tcp_fastopen=3
 
       - name: 2. Setup Secure User & Install Dependencies
         run: |
@@ -216,3 +212,8 @@ jobs:
             sleep 60
             echo "[$i/360] 🟢 Server running smoothly on $PRX_DOMAIN"
           done
+
+
+
+
+
