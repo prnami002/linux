@@ -1,4 +1,4 @@
-name: prxcore High-Speed Dedicated Workstation
+name: prxcore All-in-One Dedicated Workstation & Proxy
 
 on:
   workflow_dispatch:
@@ -9,49 +9,136 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: 1. Setup User
+      - name: 1. System & Network Tuning (BBR)
+        run: |
+          sudo sysctl -w net.core.default_qdisc=fq
+          sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
+          sudo sysctl -w net.ipv4.tcp_fastopen=3
+
+      - name: 2. Setup User & Install Dependencies
         run: |
           sudo useradd -m -s /bin/bash prxcore
           echo "prxcore:P@ssw0rd2026!" | sudo chpasswd
           sudo usermod -aG sudo prxcore
           echo "prxcore ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/prxcore
 
-      - name: 2. Install Enterprise Tools & tmux
-        run: |
           sudo apt-get update -qq
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y neofetch htop tmux curl wget -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y neofetch htop tmux curl wget nginx qrencode -qq
+
+          # نصب ttyd و cloudflared
           sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
           sudo chmod +x /usr/local/bin/ttyd
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-      - name: 3. Optimize Terminal for Ultra-Low Latency
+      - name: 3. Install & Configure Xray-Core
         run: |
-          sudo su - prxcore -c "echo 'set -sg escape-time 0' > ~/.tmux.conf"
-          sudo su - prxcore -c "echo 'set -g mouse on' >> ~/.tmux.conf"
-          sudo su - prxcore -c "echo 'set -g status-interval 1' >> ~/.tmux.conf"
+          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
-      - name: 4. Launch ttyd on Dedicated Cloudflare Domain
+          CLIENT_UUID="44e21daa-9908-4f2c-8d75-60b4fbe1b443"
+          echo "CLIENT_UUID=$CLIENT_UUID" >> $GITHUB_ENV
+
+          sudo mkdir -p /usr/local/etc/xray
+          cat <<EOF | sudo tee /usr/local/etc/xray/config.json
+          {
+            "log": { "loglevel": "warning" },
+            "inbounds": [
+              {
+                "port": 8080,
+                "listen": "127.0.0.1",
+                "protocol": "vless",
+                "settings": {
+                  "clients": [
+                    {
+                      "id": "$CLIENT_UUID",
+                      "level": 0
+                    }
+                  ],
+                  "decryption": "none"
+                },
+                "streamSettings": {
+                  "network": "ws",
+                  "wsSettings": {
+                    "path": "/prx-stream"
+                  }
+                }
+              }
+            ],
+            "outbounds": [
+              {
+                "protocol": "freedom",
+                "settings": {
+                  "domainStrategy": "UseIP"
+                }
+              }
+            ]
+          }
+          EOF
+
+          sudo systemctl enable xray
+          sudo systemctl restart xray
+
+      - name: 4. Configure Nginx Unified Multiplexer (Port 8000)
+        run: |
+          cat <<'EOF' | sudo tee /etc/nginx/sites-available/default
+          server {
+              listen 8000 default_server;
+              server_name _;
+
+              # مسیر اختصاصی ترافیک پروکسی VLESS
+              location /prx-stream {
+                  proxy_redirect off;
+                  proxy_pass http://127.0.0.1:8080;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_read_timeout 86400s;
+                  proxy_send_timeout 86400s;
+              }
+
+              # مسیر دسترسی به وب‌ترمینال در مرورگر
+              location / {
+                  proxy_pass http://127.0.0.1:7681;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_read_timeout 86400s;
+                  proxy_send_timeout 86400s;
+              }
+          }
+          EOF
+
+          sudo systemctl restart nginx
+
+      - name: 5. Launch Services & Dedicated Cloudflare Tunnel
         env:
           CF_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
         run: |
-          # اجرای وب‌ترمینال روی پورت 7681
-          sudo -u prxcore nohup /usr/local/bin/ttyd -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl -t disableLeaveAlert=true tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
+          # اجرای وب‌ترمینال روی پورت داخلی 7681
+          sudo -u prxcore nohup /usr/local/bin/ttyd -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
-          
-          # اتصال مستقیم تونل رسمی دامنه شما به وب‌ترمینال
-          sudo nohup /usr/local/bin/cloudflared tunnel --url http://127.0.0.1:7681 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
 
-      - name: 5. Keep Alive (6 Hours)
+          # اتصال تونل دامنه اختصاصی به پورت تجمیعی 8000
+          sudo nohup /usr/local/bin/cloudflared tunnel --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+
+      - name: 6. Live Display & 6-Hour Keep Alive
         run: |
+          VLESS_LINK="vless://${{ env.CLIENT_UUID }}@edge.prnamilab.shop:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=edge.prnamilab.shop&host=edge.prnamilab.shop#PRX-Dedicated"
+
           echo "=================================================="
-          echo " 🎉 HIGH-SPEED DEDICATED WORKSTATION IS LIVE!"
+          echo "🎉 ALL SERVICES ARE RUNNING AUTOMATICALLY!"
           echo "=================================================="
-          echo "👉 PERMANENT WEB TERMINAL LINK:"
-          echo "   https://edge.prnamilab.shop"
+          echo "🌐 PERMANENT WEB TERMINAL: https://edge.prnamilab.shop"
           echo "=================================================="
-          
+          echo "🚀 VLESS CONFIG LINK:"
+          echo "$VLESS_LINK"
+          echo "=================================================="
+
           for i in {1..360}; do
             sleep 60
-            echo "[$i/360] 🟢 Server active at https://edge.prnamilab.shop"
+            echo "[$i/360] 🟢 Server and proxy fully active on edge.prnamilab.shop"
           done
