@@ -167,15 +167,27 @@ jobs:
             if [ "$RECENT_ERRORS" -ge "$ERROR_THRESHOLD" ]; then
               CURRENT=$(cat /tmp/cf_proto.txt 2>/dev/null || echo "quic")
               if [ "$CURRENT" = "quic" ]; then
-                echo "$(date) ⚠️ QUIC ناپایدار — سوئیچ به HTTP/2..." >> /tmp/tunnel_monitor.log
+                echo "$(date) ⚠️ QUIC ناپایدار — شروع Hot-Swap به HTTP/2..." >> /tmp/tunnel_monitor.log
 
-                # کشتن تونل QUIC و ریستارت با HTTP/2
-                sudo pkill -f cloudflared
-                sleep 2
+                # ذخیره PID تونل فعلی QUIC
+                OLD_PID=$(pgrep -f "cloudflared tunnel")
+
+                # اول تونل HTTP/2 جدید رو بالا بیار (بدون کشتن قبلی)
+                sudo nohup /usr/local/bin/cloudflared tunnel --protocol http2 --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel_http2.log 2>&1 &
+                NEW_PID=$!
+
+                # صبر تا تونل جدید آماده بشه
+                sleep 8
+
+                # حالا تونل QUIC قدیمی رو بکش
+                if [ -n "$OLD_PID" ]; then
+                  sudo kill "$OLD_PID" 2>/dev/null
+                fi
+
                 echo "http2" > /tmp/cf_proto.txt
-                sudo nohup /usr/local/bin/cloudflared tunnel --protocol http2 --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+                sudo cp /tmp/cf_tunnel_http2.log /tmp/cf_tunnel.log
 
-                echo "$(date) ✅ تونل با HTTP/2 ریستارت شد" >> /tmp/tunnel_monitor.log
+                echo "$(date) ✅ Hot-Swap کامل شد — HTTP/2 فعال (بدون قطعی)" >> /tmp/tunnel_monitor.log
               fi
             fi
           done
