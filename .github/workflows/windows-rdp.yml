@@ -67,6 +67,7 @@ jobs:
                     "heartbeatPeriod": 20
                   },
                   "sockopt": {
+                    "tcpFastOpen": true,
                     "tcpKeepAliveInterval": 15
                   }
                 }
@@ -77,6 +78,11 @@ jobs:
                 "protocol": "freedom",
                 "settings": {
                   "domainStrategy": "AsIs"
+                },
+                "streamSettings": {
+                  "sockopt": {
+                    "tcpFastOpen": true
+                  }
                 }
               }
             ]
@@ -206,3 +212,8 @@ jobs:
             sleep 60
             echo "[$i/360] 🟢 Server running smoothly on $PRX_DOMAIN"
           done
+
+
+
+
+
