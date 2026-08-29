@@ -1,4 +1,4 @@
-name: prxcore All-in-One Dedicated Workstation & Proxy
+name: prxcore All-in-One Dedicated Workstation & Proxy (Secure Edition)
 
 on:
   workflow_dispatch:
@@ -8,9 +8,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
+    env:
+      CF_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+      PRX_DOMAIN: ${{ secrets.PRX_DOMAIN }}
+      PRX_UUID: ${{ secrets.PRX_UUID }}
+      PRX_USER_PASS: ${{ secrets.PRX_USER_PASS }}
+
     steps:
-      - name: 1. System & Network Tuning (BBR & TCP Buffers)
+      - name: 1. Validate Secrets & Tune Kernel (BBR & Low Latency)
         run: |
+          if [ -z "$CF_TOKEN" ] || [ -z "$PRX_DOMAIN" ] || [ -z "$PRX_UUID" ] || [ -z "$PRX_USER_PASS" ]; then
+            echo "❌ خطا: لطفاً مطمئن شوید تمام سکرت‌ها (CF_TUNNEL_TOKEN, PRX_DOMAIN, PRX_UUID, PRX_USER_PASS) در تنظیمات گیت‌هاب تعریف شده‌اند."
+            exit 1
+          fi
+
           sudo sysctl -w net.core.default_qdisc=fq
           sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
           sudo sysctl -w net.ipv4.tcp_fastopen=3
@@ -19,10 +30,10 @@ jobs:
           sudo sysctl -w net.core.rmem_max=67108864
           sudo sysctl -w net.core.wmem_max=67108864
 
-      - name: 2. Setup User & Install Dependencies
+      - name: 2. Setup Secure User & Install Dependencies
         run: |
           sudo useradd -m -s /bin/bash prxcore
-          echo "prxcore:P@ssw0rd2026!" | sudo chpasswd
+          echo "prxcore:$PRX_USER_PASS" | sudo chpasswd
           sudo usermod -aG sudo prxcore
           echo "prxcore ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/prxcore
 
@@ -39,9 +50,6 @@ jobs:
         run: |
           sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
-          CLIENT_UUID="44e21daa-9908-4f2c-8d75-60b4fbe1b443"
-          echo "CLIENT_UUID=$CLIENT_UUID" >> $GITHUB_ENV
-
           sudo mkdir -p /usr/local/etc/xray
           cat <<EOF | sudo tee /usr/local/etc/xray/config.json
           {
@@ -54,7 +62,7 @@ jobs:
                 "settings": {
                   "clients": [
                     {
-                      "id": "$CLIENT_UUID",
+                      "id": "$PRX_UUID",
                       "level": 0
                     }
                   ],
@@ -106,7 +114,7 @@ jobs:
                   proxy_send_timeout 86400s;
               }
 
-              # مسیر دسترسی به وب‌ترمینال در مرورگر
+              # مسیر دسترسی به وب‌ترمینال با احراز هویت
               location / {
                   proxy_pass http://127.0.0.1:7681;
                   proxy_http_version 1.1;
@@ -123,30 +131,27 @@ jobs:
           sudo systemctl restart nginx
 
       - name: 5. Launch Services & Dedicated Cloudflare Tunnel (QUIC Protocol)
-        env:
-          CF_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
         run: |
-          # اجرای وب‌ترمینال روی پورت داخلی 7681
-          sudo -u prxcore nohup /usr/local/bin/ttyd -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
+          # اجرای وب‌ترمینال با قفل امنیتی نام‌کاربری و پسورد
+          sudo nohup /usr/local/bin/ttyd -c "prxcore:$PRX_USER_PASS" -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # اجرای رسمی تونل کلودفلر با پروتکل سریع QUIC
+          # اجرای رسمی تونل کلودفلر با پروتکل QUIC
           sudo nohup /usr/local/bin/cloudflared tunnel --protocol quic --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
 
       - name: 6. Live Display & 6-Hour Keep Alive
         run: |
-          VLESS_LINK="vless://${{ env.CLIENT_UUID }}@edge.prnamilab.shop:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=edge.prnamilab.shop&host=edge.prnamilab.shop#PRX-Dedicated"
-
           echo "=================================================="
-          echo "🎉 ALL SERVICES ARE RUNNING PERFECTLY!"
+          echo "🎉 SECURE PUBLIC WORKSTATION & PROXY IS RUNNING!"
           echo "=================================================="
-          echo "🌐 PERMANENT WEB TERMINAL: https://edge.prnamilab.shop"
+          echo "🌐 Web Terminal URL: https://$PRX_DOMAIN"
+          echo "🔐 Terminal Login: Username: prxcore | Password: [Protected by Secrets]"
           echo "=================================================="
           echo "🚀 VLESS CONFIG LINK:"
-          echo "$VLESS_LINK"
+          echo "vless://$PRX_UUID@$PRX_DOMAIN:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=$PRX_DOMAIN&host=$PRX_DOMAIN#PRX-Dedicated"
           echo "=================================================="
 
           for i in {1..360}; do
             sleep 60
-            echo "[$i/360] 🟢 Server and proxy fully active on edge.prnamilab.shop"
+            echo "[$i/360] 🟢 Server running securely on $PRX_DOMAIN"
           done
