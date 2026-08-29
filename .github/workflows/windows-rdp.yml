@@ -38,12 +38,15 @@ jobs:
 
       - name: 3. Install & Configure High-Performance Xray-Core
         run: |
-          # نصب رسمی Xray
-          bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+          # نصب رسمی Xray با دسترسی روت
+          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
           # تولید UUID ثابت برای ارتباط
           CLIENT_UUID="44e21daa-9908-4f2c-8d75-60b4fbe1b443"
           echo "CLIENT_UUID=$CLIENT_UUID" >> $GITHUB_ENV
+
+          # اطمینان از وجود دایرکتوری کانفیگ
+          sudo mkdir -p /usr/local/etc/xray
 
           # ساخت کانفیگ بهینه VLESS-WS روی پورت لوکال 8080
           cat <<EOF | sudo tee /usr/local/etc/xray/config.json
@@ -82,6 +85,7 @@ jobs:
           }
           EOF
 
+          sudo systemctl enable xray
           sudo systemctl restart xray
 
       - name: 4. Launch Services (Web Terminal & Cloudflare Dedicated Tunnel)
