@@ -1,4 +1,4 @@
-name: prxcore All-in-One Dedicated Workstation & Proxy
+name: prxcore Ultra-Low Latency gRPC Workstation & Proxy
 
 on:
   workflow_dispatch:
@@ -14,8 +14,10 @@ jobs:
           sudo sysctl -w net.core.default_qdisc=fq
           sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
           sudo sysctl -w net.ipv4.tcp_fastopen=3
-          sudo sysctl -w net.ipv4.tcp_low_latency=1
           sudo sysctl -w net.ipv4.tcp_slow_start_after_idle=0
+          sudo sysctl -w net.ipv4.tcp_notsent_lowat=16384
+          sudo sysctl -w net.core.rmem_max=67108864
+          sudo sysctl -w net.core.wmem_max=67108864
 
       - name: 2. Setup User & Install Dependencies
         run: |
@@ -27,13 +29,13 @@ jobs:
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y neofetch htop tmux curl wget nginx qrencode -qq
 
-          # دانلود و نصب ttyd و cloudflared
+          # دانلود آخرین نسخه‌های ابزارهای ttyd و cloudflared
           sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
           sudo chmod +x /usr/local/bin/ttyd
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-      - name: 3. Install & Configure Xray-Core (Optimized WS + Heartbeat)
+      - name: 3. Install & Configure Xray-Core (High-Speed gRPC Mode)
         run: |
           sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
 
@@ -59,10 +61,10 @@ jobs:
                   "decryption": "none"
                 },
                 "streamSettings": {
-                  "network": "ws",
-                  "wsSettings": {
-                    "path": "/prx-stream",
-                    "heartbeatPeriod": 20
+                  "network": "grpc",
+                  "grpcSettings": {
+                    "serviceName": "prx-grpc",
+                    "multiMode": true
                   }
                 }
               }
@@ -81,25 +83,20 @@ jobs:
           sudo systemctl enable xray
           sudo systemctl restart xray
 
-      - name: 4. Configure Nginx Unified Multiplexer (Port 8000)
+      - name: 4. Configure Nginx Unified HTTP/2 & gRPC Multiplexer
         run: |
           cat <<'EOF' | sudo tee /etc/nginx/sites-available/default
           server {
-              listen 8000 default_server;
+              listen 8000 http2 default_server;
               server_name _;
+              client_max_body_size 0;
 
-              # مسیر اختصاصی ترافیک پروکسی VLESS
-              location /prx-stream {
-                  proxy_redirect off;
-                  proxy_pass http://127.0.0.1:8080;
-                  proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection "upgrade";
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_read_timeout 86400s;
-                  proxy_send_timeout 86400s;
+              # هدایت بسته‌های باینری پروتکل gRPC به هسته Xray
+              location /prx-grpc {
+                  grpc_pass grpc://127.0.0.1:8080;
+                  grpc_read_timeout 86400s;
+                  grpc_send_timeout 86400s;
+                  client_body_buffer_size 1m;
               }
 
               # مسیر دسترسی به وب‌ترمینال در مرورگر
@@ -109,6 +106,7 @@ jobs:
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection "upgrade";
                   proxy_set_header Host $host;
+                  proxy_buffering off;
                   proxy_read_timeout 86400s;
                   proxy_send_timeout 86400s;
               }
@@ -125,23 +123,23 @@ jobs:
           sudo -u prxcore nohup /usr/local/bin/ttyd -W -p 7681 -t fontSize=16 -t theme="{'background': '#0f172a'}" -t rendererType=webgl tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # اجرای رسمی تونل کلودفلر با پروتکل فوق‌سریع QUIC
+          # اجرای تونل رسمی کلودفلر با پروتکل پرسرعت QUIC
           sudo nohup /usr/local/bin/cloudflared tunnel --protocol quic --url http://127.0.0.1:8000 --no-autoupdate run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
 
       - name: 6. Live Display & 6-Hour Keep Alive
         run: |
-          VLESS_LINK="vless://${{ env.CLIENT_UUID }}@edge.prnamilab.shop:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=edge.prnamilab.shop&host=edge.prnamilab.shop#PRX-Dedicated"
+          VLESS_GRPC_LINK="vless://${{ env.CLIENT_UUID }}@edge.prnamilab.shop:443?mode=multi&security=tls&encryption=none&type=grpc&serviceName=prx-grpc&sni=edge.prnamilab.shop#PRX-gRPC-Dedicated"
 
           echo "=================================================="
-          echo "🎉 ALL SERVICES ARE RUNNING WITH QUIC & HEARTBEAT!"
+          echo "🎉 ULTRA-LOW LATENCY gRPC SUITE IS ACTIVE!"
           echo "=================================================="
           echo "🌐 PERMANENT WEB TERMINAL: https://edge.prnamilab.shop"
           echo "=================================================="
-          echo "🚀 VLESS CONFIG LINK:"
-          echo "$VLESS_LINK"
+          echo "🚀 VLESS gRPC CONFIG LINK:"
+          echo "$VLESS_GRPC_LINK"
           echo "=================================================="
 
           for i in {1..360}; do
             sleep 60
-            echo "[$i/360] 🟢 Server and proxy fully active on edge.prnamilab.shop"
+            echo "[$i/360] 🟢 Server and gRPC proxy fully active on edge.prnamilab.shop"
           done
