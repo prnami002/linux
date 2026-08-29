@@ -22,10 +22,6 @@ jobs:
             exit 1
           fi
 
-          sudo sysctl -w net.core.default_qdisc=fq
-          sudo sysctl -w net.ipv4.tcp_congestion_control=bbr
-          sudo sysctl -w net.ipv4.tcp_fastopen=3
-
       - name: 2. Setup Secure User & Install Dependencies
         run: |
           sudo useradd -m -s /bin/bash prxcore
