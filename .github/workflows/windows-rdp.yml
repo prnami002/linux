@@ -67,7 +67,6 @@ jobs:
                     "heartbeatPeriod": 20
                   },
                   "sockopt": {
-                    "tcpFastOpen": true,
                     "tcpKeepAliveInterval": 15
                   }
                 }
@@ -78,11 +77,6 @@ jobs:
                 "protocol": "freedom",
                 "settings": {
                   "domainStrategy": "AsIs"
-                },
-                "streamSettings": {
-                  "sockopt": {
-                    "tcpFastOpen": true
-                  }
                 }
               }
             ]
