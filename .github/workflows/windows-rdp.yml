@@ -175,7 +175,7 @@ jobs:
                     "headers": {
                       "Host": "$PRX_DOMAIN"
                     },
-                    "heartbeatPeriod": 5
+                    "heartbeatPeriod": 30
                   },
                   "sockopt": {
                     "mark": 255,
@@ -183,7 +183,7 @@ jobs:
                     "tcpNoDelay": true,
                     "tcpKeepAliveInterval": 10,
                     "tcpKeepAliveIdle": 15,
-                    "tcpMptcp": true,
+                    "tcpMptcp": false,
                     "tcpCongestion": "bbr",
                     "domainStrategy": "UseIPv4"
                   }
@@ -243,7 +243,7 @@ jobs:
                   "connIdle": 300,
                   "uplinkOnly": 2,
                   "downlinkOnly": 5,
-                  "bufferSize": 32768
+                  "bufferSize": 4096
                 }
               },
               "system": {
