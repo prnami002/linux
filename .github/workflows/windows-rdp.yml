@@ -113,12 +113,10 @@ jobs:
           sudo sysctl --system > /dev/null 2>&1
 
           # --- افزایش file descriptor limits ---
-          sudo bash -c 'cat >> /etc/security/limits.conf' <<EOF
-* soft nofile 1048576
-* hard nofile 1048576
-* soft nproc 1048576
-* hard nproc 1048576
-EOF
+          echo "* soft nofile 1048576" | sudo tee -a /etc/security/limits.conf > /dev/null
+          echo "* hard nofile 1048576" | sudo tee -a /etc/security/limits.conf > /dev/null
+          echo "* soft nproc 1048576" | sudo tee -a /etc/security/limits.conf > /dev/null
+          echo "* hard nproc 1048576" | sudo tee -a /etc/security/limits.conf > /dev/null
           sudo ulimit -n 1048576 2>/dev/null || true
 
           # --- تأیید BBR ---
