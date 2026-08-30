@@ -239,10 +239,10 @@ jobs:
             "policy": {
               "levels": {
                 "0": {
-                  "handshake": 3,
+                  "handshake": 5,
                   "connIdle": 300,
-                  "uplinkOnly": 1,
-                  "downlinkOnly": 3,
+                  "uplinkOnly": 2,
+                  "downlinkOnly": 5,
                   "bufferSize": 32768
                 }
               },
@@ -386,8 +386,8 @@ jobs:
               # === صفحه وضعیت داخلی ===
               location /health {
                   access_log off;
+                  default_type application/json;
                   return 200 '{"status":"ok","timestamp":"$time_iso8601"}';
-                  add_header Content-Type application/json;
               }
           }
           SITE
@@ -455,8 +455,13 @@ jobs:
           fi
 
           # --- اسکریپت مانیتورینگ هوشمند — بالانس سرعت واکنش و پایداری ---
+          # ذخیره توکن در فایل برای دسترسی مانیتور (sudo محیط رو ریست می‌کنه)
+          echo "$CF_TOKEN" > /tmp/.cf_token
+          chmod 600 /tmp/.cf_token
+
           cat <<'MONITOR' | sudo tee /usr/local/bin/tunnel_monitor.sh > /dev/null
           #!/bin/bash
+          CF_TOKEN=$(cat /tmp/.cf_token 2>/dev/null)
           ERROR_THRESHOLD=5
           CHECK_INTERVAL=15
           HEALTH_CHECK_URL="http://127.0.0.1:8000/health"
@@ -490,6 +495,12 @@ jobs:
             # بررسی اینکه آیا cloudflared هنوز زنده‌ست
             CF_ALIVE=$(pgrep -c -f "cloudflared tunnel" 2>/dev/null || echo "0")
 
+            # بررسی و ری‌استارت Nginx در صورت نیاز
+            if [ "$NGINX_OK" -ne 0 ]; then
+              log "⚠️ Nginx پاسخ نمیده — ری‌استارت..."
+              sudo systemctl restart nginx
+            fi
+
             # تصمیم‌گیری: سوئیچ لازمه؟
             NEED_SWAP=false
 
@@ -515,7 +526,10 @@ jobs:
               # ذخیره PID تونل فعلی
               OLD_PID=$(pgrep -f "cloudflared tunnel" | head -1)
 
-              # اول تونل جدید رو بالا بیار
+              # انتقال لاگ قبلی (fd قدیمی همچنان به inode قبلی اشاره می‌کنه)
+              sudo mv /tmp/cf_tunnel.log /tmp/cf_tunnel_old.log 2>/dev/null
+
+              # اول تونل جدید رو بالا بیار (لاگ مستقیم روی فایل اصلی)
               sudo nohup /usr/local/bin/cloudflared tunnel \
                 --protocol $NEXT \
                 --url http://127.0.0.1:8000 \
@@ -523,7 +537,7 @@ jobs:
                 --edge-ip-version 4 \
                 --grace-period 20s \
                 --retries 15 \
-                run --token "$CF_TOKEN" > /tmp/cf_tunnel_new.log 2>&1 &
+                run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
               NEW_PID=$!
 
               # صبر تا تونل جدید آماده بشه
@@ -540,13 +554,15 @@ jobs:
                 fi
 
                 echo "$NEXT" > /tmp/cf_proto.txt
-                sudo cp /tmp/cf_tunnel_new.log /tmp/cf_tunnel.log
+                sudo rm -f /tmp/cf_tunnel_old.log 2>/dev/null
                 LAST_SWAP=$NOW
 
                 log "✅ Hot-Swap موفق: $NEXT فعال (بدون قطعی)"
               else
                 log "❌ تونل جدید ($NEXT) ناموفق — ماندن روی $CURRENT"
                 sudo kill "$NEW_PID" 2>/dev/null
+                # بازگرداندن لاگ اصلی
+                sudo mv /tmp/cf_tunnel_old.log /tmp/cf_tunnel.log 2>/dev/null
               fi
             fi
           done
@@ -559,14 +575,14 @@ jobs:
 
       - name: 6. Generate Connection Info & 6-Hour Keep Alive
         run: |
-          VLESS_LINK="vless://$PRX_UUID@$PRX_DOMAIN:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=$PRX_DOMAIN&host=$PRX_DOMAIN&alpn=h2%2Chttp%2F1.1&fp=chrome#PRX-Ultra"
+          VLESS_LINK="vless://$PRX_UUID@$PRX_DOMAIN:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=$PRX_DOMAIN&host=$PRX_DOMAIN&alpn=http%2F1.1&fp=chrome#PRX-Ultra"
 
           echo ""
           echo "╔══════════════════════════════════════════════════════════╗"
           echo "║  🎉 ULTRA OPTIMIZED WORKSTATION & PROXY IS RUNNING!    ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║                                                        ║"
-          echo "║  🌐 Web Terminal:  https://$PRX_DOMAIN"
+          printf "║  🌐 Web Terminal:  https://%s\n" "$PRX_DOMAIN"
           echo "║  🔐 Login:         prxcore / [Secret Protected]        ║"
           echo "║                                                        ║"
           echo "╠══════════════════════════════════════════════════════════╣"
