@@ -575,7 +575,7 @@ jobs:
 
       - name: 6. Generate Connection Info & 6-Hour Keep Alive
         run: |
-          VLESS_LINK="vless://$PRX_UUID@$PRX_DOMAIN:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=$PRX_DOMAIN&host=$PRX_DOMAIN&alpn=http%2F1.1&fp=chrome#PRX-Ultra"
+          VLESS_LINK="vless://$PRX_UUID@$PRX_DOMAIN:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=$PRX_DOMAIN&host=$PRX_DOMAIN&alpn=h2%2Chttp%2F1.1&fp=chrome#PRX-Ultra"
 
           echo ""
           echo "╔══════════════════════════════════════════════════════════╗"
