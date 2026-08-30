@@ -113,12 +113,12 @@ jobs:
           sudo sysctl --system > /dev/null 2>&1
 
           # --- افزایش file descriptor limits ---
-          sudo bash -c 'cat >> /etc/security/limits.conf <<EOF
-          * soft nofile 1048576
-          * hard nofile 1048576
-          * soft nproc 1048576
-          * hard nproc 1048576
-          EOF'
+          sudo bash -c 'cat >> /etc/security/limits.conf' <<EOF
+* soft nofile 1048576
+* hard nofile 1048576
+* soft nproc 1048576
+* hard nproc 1048576
+EOF
           sudo ulimit -n 1048576 2>/dev/null || true
 
           # --- تأیید BBR ---
@@ -474,6 +474,10 @@ jobs:
             echo "✅ Cloudflare Tunnel با فالبک $CURRENT_PROTO اجرا شد."
           fi
 
+          # ذخیره توکن برای دسترسی مانیتور (heredoc با single-quote expand نمی‌کنه)
+          echo "$CF_TOKEN" > /tmp/.cf_token_ref
+          chmod 600 /tmp/.cf_token_ref
+
           # --- مانیتور هوشمند — محافظه‌کار برای پایداری حداکثری ---
           cat <<'MONITOR' | sudo tee /usr/local/bin/tunnel_monitor.sh > /dev/null
           #!/bin/bash
@@ -482,6 +486,7 @@ jobs:
           HEALTH_CHECK_URL="http://127.0.0.1:8000/health"
           COOLDOWN=120
           LAST_SWAP=0
+          CF_TOKEN_VAL=$(cat /tmp/.cf_token_ref 2>/dev/null)
 
           log() {
             echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> /tmp/tunnel_monitor.log
@@ -536,7 +541,7 @@ jobs:
                 --edge-ip-version 4 \
                 --grace-period 25s \
                 --retries 20 \
-                run --token "$CF_TOKEN" > /tmp/cf_tunnel_new.log 2>&1 &
+                run --token "$CF_TOKEN_VAL" > /tmp/cf_tunnel_new.log 2>&1 &
               NEW_PID=$!
 
               sleep 12
