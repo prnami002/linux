@@ -5,7 +5,679 @@ on:
 
 jobs:
   build:
+    runs-on: ubuntu-latestname: prxcore All-in-One Dedicated Workstation & Proxy (Ultra Optimized Edition)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      CF_TOKEN: ${{ secrets.CF_TUNNEL_TOKEN }}
+      PRX_DOMAIN: ${{ secrets.PRX_DOMAIN }}
+      PRX_UUID: ${{ secrets.PRX_UUID }}
+      PRX_USER_PASS: ${{ secrets.PRX_USER_PASS }}
+
+    steps:
+      - name: 1. Validate Secrets & Deep Kernel Network Tuning (BBR + FastOpen + Buffer)
+        run: |
+          # --- اعتبارسنجی سکرت‌ها ---
+          if [ -z "$CF_TOKEN" ] || [ -z "$PRX_DOMAIN" ] || [ -z "$PRX_UUID" ] || [ -z "$PRX_USER_PASS" ]; then
+            echo "❌ خطا: لطفاً مطمئن شوید تمام سکرت‌ها (CF_TUNNEL_TOKEN, PRX_DOMAIN, PRX_UUID, PRX_USER_PASS) در تنظیمات گیت‌هاب تعریف شده‌اند."
+            exit 1
+          fi
+          echo "✅ تمام سکرت‌ها تأیید شدند."
+
+          # --- فعال‌سازی BBR (الگوریتم کنترل ازدحام گوگل) ---
+          sudo modprobe tcp_bbr 2>/dev/null || true
+          echo "tcp_bbr" | sudo tee -a /etc/modules-load.d/bbr.conf > /dev/null
+
+          # --- تنظیمات عمیق کرنل — حداکثر سرعت و حداقل لیتنسی (بدون محدودیت منابع) ---
+          sudo tee /etc/sysctl.d/99-prxcore-optimize.conf > /dev/null <<'SYSCTL'
+          # === BBR Congestion Control ===
+          net.core.default_qdisc = fq
+          net.ipv4.tcp_congestion_control = bbr
+
+          # === TCP Fast Open (هم سرور هم کلاینت) ===
+          net.ipv4.tcp_fastopen = 3
+
+          # === غیرفعال‌سازی Slow Start بعد از Idle ===
+          net.ipv4.tcp_slow_start_after_idle = 0
+
+          # === بافرهای شبکه — دوبرابر مقدار قبلی برای throughput حداکثری ===
+          net.core.rmem_default = 2097152
+          net.core.rmem_max = 67108864
+          net.core.wmem_default = 2097152
+          net.core.wmem_max = 67108864
+          net.ipv4.tcp_rmem = 4096 2097152 67108864
+          net.ipv4.tcp_wmem = 4096 2097152 67108864
+          net.core.somaxconn = 65535
+          net.core.netdev_max_backlog = 250000
+          net.core.optmem_max = 65536
+
+          # === TCP Window Scaling برای اتصالات بلند مسافت ===
+          net.ipv4.tcp_window_scaling = 1
+          net.ipv4.tcp_adv_win_scale = -2
+
+          # === SACK و Timestamps — بازیابی سریع‌تر از packet loss + اندازه‌گیری دقیق RTT ===
+          net.ipv4.tcp_sack = 1
+          net.ipv4.tcp_dsack = 1
+          net.ipv4.tcp_timestamps = 1
+
+          # === عدم ذخیره متریک‌ها — هر اتصال با تنظیمات بهینه fresh شروع کنه ===
+          net.ipv4.tcp_no_metrics_save = 1
+
+          # === Forward RTO-Recovery — بازیابی سریع‌تر بعد از packet loss ===
+          net.ipv4.tcp_frto = 2
+
+          # === کاهش TIME_WAIT — آزادسازی سریع‌تر پورت‌ها ===
+          net.ipv4.tcp_fin_timeout = 15
+          net.ipv4.tcp_tw_reuse = 1
+          net.ipv4.tcp_max_tw_buckets = 2000000
+
+          # === TCP Keepalive — بالانس سرعت تشخیص و تحمل قطعی موقت (75 ثانیه) ===
+          net.ipv4.tcp_keepalive_time = 45
+          net.ipv4.tcp_keepalive_intvl = 5
+          net.ipv4.tcp_keepalive_probes = 6
+
+          # === SYN Cookies + Backlog بالا ===
+          net.ipv4.tcp_syncookies = 1
+          net.ipv4.tcp_max_syn_backlog = 65535
+
+          # === MTU Probing خودکار ===
+          net.ipv4.tcp_mtu_probing = 1
+
+          # === حداکثر اتصالات همزمان ===
+          net.ipv4.ip_local_port_range = 1024 65535
+
+          # === ECN غیرفعال — سازگاری بیشتر و کاهش لیتنسی ===
+          net.ipv4.tcp_ecn = 0
+
+          # === ARP Cache بزرگ‌تر ===
+          net.ipv4.neigh.default.gc_thresh1 = 1024
+          net.ipv4.neigh.default.gc_thresh2 = 4096
+          net.ipv4.neigh.default.gc_thresh3 = 8192
+
+          # === غیرفعال‌سازی IPv6 (مسیر کوتاه‌تر) ===
+          net.ipv6.conf.all.disable_ipv6 = 1
+          net.ipv6.conf.default.disable_ipv6 = 1
+          SYSCTL
+
+          sudo sysctl --system > /dev/null 2>&1
+
+          # --- تأیید فعال‌بودن BBR ---
+          CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control)
+          if [ "$CURRENT_CC" = "bbr" ]; then
+            echo "✅ BBR فعال شد: $CURRENT_CC"
+          else
+            echo "⚠️ BBR فعال نشد — فالبک به: $CURRENT_CC"
+          fi
+
+          echo "✅ تمام تنظیمات کرنل اعمال شدند."
+
+      - name: 2. Setup Secure User & Install Dependencies
+        run: |
+          sudo useradd -m -s /bin/bash prxcore
+          echo "prxcore:$PRX_USER_PASS" | sudo chpasswd
+          sudo usermod -aG sudo prxcore
+          echo "prxcore ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/prxcore > /dev/null
+
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            neofetch htop tmux curl wget nginx qrencode jq \
+            xvfb fluxbox x11vnc novnc python3-websockify -qq
+
+          # دانلود ttyd
+          sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
+          sudo chmod +x /usr/local/bin/ttyd
+
+          # دانلود cloudflared
+          sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
+          sudo chmod +x /usr/local/bin/cloudflared
+
+          echo "✅ تمام وابستگی‌ها نصب شدند."
+
+      - name: 3. Install & Configure Xray-Core (Fully Optimized VLESS WS)
+        run: |
+          sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
+
+          sudo mkdir -p /usr/local/etc/xray
+          cat <<EOF | sudo tee /usr/local/etc/xray/config.json
+          {
+            "log": {
+              "loglevel": "none",
+              "access": "none"
+            },
+            "dns": {
+              "servers": [
+                {
+                  "address": "1.1.1.1",
+                  "skipFallback": true
+                },
+                "8.8.8.8"
+              ],
+              "queryStrategy": "UseIPv4",
+              "disableCache": false
+            },
+            "inbounds": [
+              {
+                "port": 8080,
+                "listen": "127.0.0.1",
+                "protocol": "vless",
+                "settings": {
+                  "clients": [
+                    {
+                      "id": "$PRX_UUID",
+                      "level": 0
+                    }
+                  ],
+                  "decryption": "none"
+                },
+                "streamSettings": {
+                  "network": "ws",
+                  "wsSettings": {
+                    "path": "/prx-stream",
+                    "headers": {
+                      "Host": "$PRX_DOMAIN"
+                    },
+                    "heartbeatPeriod": 30
+                  },
+                  "sockopt": {
+                    "mark": 255,
+                    "tcpFastOpen": true,
+                    "tcpNoDelay": true,
+                    "tcpKeepAliveInterval": 10,
+                    "tcpKeepAliveIdle": 15,
+                    "tcpMptcp": false,
+                    "tcpCongestion": "bbr",
+                    "domainStrategy": "UseIPv4"
+                  }
+                },
+                "sniffing": {
+                  "enabled": true,
+                  "destOverride": ["http", "tls"],
+                  "routeOnly": true
+                }
+              }
+            ],
+            "outbounds": [
+              {
+                "tag": "direct",
+                "protocol": "freedom",
+                "settings": {
+                  "domainStrategy": "UseIPv4"
+                },
+                "streamSettings": {
+                  "sockopt": {
+                    "mark": 255,
+                    "tcpFastOpen": true,
+                    "tcpNoDelay": true,
+                    "tcpCongestion": "bbr"
+                  }
+                }
+              },
+              {
+                "tag": "block",
+                "protocol": "blackhole",
+                "settings": {
+                  "response": {
+                    "type": "http"
+                  }
+                }
+              }
+            ],
+            "routing": {
+              "domainStrategy": "IPIfNonMatch",
+              "rules": [
+                {
+                  "type": "field",
+                  "outboundTag": "block",
+                  "protocol": ["bittorrent"]
+                },
+                {
+                  "type": "field",
+                  "outboundTag": "direct",
+                  "network": "tcp,udp"
+                }
+              ]
+            },
+            "policy": {
+              "levels": {
+                "0": {
+                  "handshake": 5,
+                  "connIdle": 300,
+                  "uplinkOnly": 2,
+                  "downlinkOnly": 5,
+                  "bufferSize": 4096
+                }
+              },
+              "system": {
+                "statsOutboundUplink": false,
+                "statsOutboundDownlink": false
+              }
+            }
+          }
+          EOF
+
+          sudo systemctl enable xray
+          sudo systemctl restart xray
+          sleep 2
+
+          # بررسی اجرای صحیح Xray
+          if sudo systemctl is-active --quiet xray; then
+            echo "✅ Xray با موفقیت اجرا شد."
+          else
+            echo "❌ خطا در اجرای Xray:"
+            sudo journalctl -u xray --no-pager -n 20
+            exit 1
+          fi
+
+      - name: 4. Configure Nginx High-Performance Multiplexer (Port 8000)
+        run: |
+          # --- کانفیگ اصلی Nginx — حداکثر عملکرد بدون محدودیت منابع ---
+          cat <<'MAIN' | sudo tee /etc/nginx/nginx.conf
+          user www-data;
+          worker_processes auto;
+          worker_rlimit_nofile 131072;
+          pid /run/nginx.pid;
+
+          events {
+              worker_connections 16384;
+              multi_accept on;
+              use epoll;
+          }
+
+          http {
+              # === تنظیمات پایه ===
+              sendfile on;
+              tcp_nopush on;
+              tcp_nodelay on;
+              types_hash_max_size 2048;
+              server_tokens off;
+
+              # === Keepalive تهاجمی — نگه‌داشتن اتصالات زنده بیشتر ===
+              keepalive_timeout 120;
+              keepalive_requests 100000;
+
+              # === بافرهای پروکسی بزرگ‌تر ===
+              proxy_buffer_size 32k;
+              proxy_buffers 8 64k;
+              proxy_busy_buffers_size 128k;
+
+              # === فشرده‌سازی Gzip (برای ترافیک غیر-WS) ===
+              gzip on;
+              gzip_vary on;
+              gzip_comp_level 4;
+              gzip_min_length 256;
+              gzip_proxied any;
+              gzip_types
+                  text/plain
+                  text/css
+                  text/xml
+                  text/javascript
+                  application/json
+                  application/javascript
+                  application/xml
+                  application/rss+xml
+                  image/svg+xml;
+
+              include /etc/nginx/mime.types;
+              default_type application/octet-stream;
+              include /etc/nginx/conf.d/*.conf;
+              include /etc/nginx/sites-enabled/*;
+          }
+          MAIN
+
+          # --- کانفیگ سایت ---
+          cat <<'SITE' | sudo tee /etc/nginx/sites-available/default
+          # Upstream با keepalive بالا — کاهش لیتنسی reconnect
+          upstream xray_backend {
+              server 127.0.0.1:8080;
+              keepalive 256;
+          }
+
+          upstream ttyd_backend {
+              server 127.0.0.1:7681;
+              keepalive 64;
+          }
+
+          server {
+              listen 8000 default_server reuseport;
+              server_name _;
+              client_max_body_size 0;
+
+              # === مسیر پروکسی VLESS WS (بهینه‌شده برای لیتنسی پایین) ===
+              location /prx-stream {
+                  proxy_redirect off;
+                  proxy_pass http://xray_backend;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+
+                  # بدون بافرینگ برای real-time — حداقل لیتنسی
+                  proxy_buffering off;
+                  proxy_request_buffering off;
+
+                  # تایم‌اوت کانکت کوتاه‌تر — فیل‌اوور سریع‌تر
+                  proxy_connect_timeout 2s;
+                  proxy_read_timeout 86400s;
+                  proxy_send_timeout 86400s;
+
+                  # TCP بهینه
+                  proxy_socket_keepalive on;
+              }
+
+              # === مسیر وب‌ترمینال ===
+              location / {
+                  proxy_pass http://ttyd_backend;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+                  proxy_buffering off;
+                  proxy_connect_timeout 2s;
+                  proxy_read_timeout 86400s;
+                  proxy_send_timeout 86400s;
+                  proxy_socket_keepalive on;
+              }
+
+              # === مرورگر ابری (noVNC) ===
+              location /browser/ {
+                  proxy_pass http://127.0.0.1:6080/;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_buffering off;
+                  proxy_read_timeout 86400s;
+                  proxy_send_timeout 86400s;
+                  proxy_socket_keepalive on;
+              }
+
+              # === صفحه وضعیت داخلی ===
+              location /health {
+                  access_log off;
+                  default_type application/json;
+                  return 200 '{"status":"ok","timestamp":"$time_iso8601"}';
+              }
+          }
+          SITE
+
+          # تست کانفیگ قبل از ری‌استارت
+          sudo nginx -t
+          if [ $? -eq 0 ]; then
+            sudo systemctl restart nginx
+            echo "✅ Nginx با کانفیگ بهینه اجرا شد."
+          else
+            echo "❌ خطا در کانفیگ Nginx!"
+            exit 1
+          fi
+
+      - name: 5. Launch Services & Smart Cloudflare Tunnel (Advanced Auto-Fallback)
+        run: |
+          # --- اجرای وب‌ترمینال با احراز هویت ---
+          sudo nohup /usr/local/bin/ttyd \
+            -c "prxcore:$PRX_USER_PASS" \
+            -W \
+            -p 7681 \
+            -t fontSize=16 \
+            -t 'theme={"background": "#0f172a"}' \
+            -t rendererType=webgl \
+            tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
+          sleep 2
+
+          if pgrep -f ttyd > /dev/null; then
+            echo "✅ وب‌ترمینال اجرا شد."
+          else
+            echo "⚠️ خطا در اجرای وب‌ترمینال."
+          fi
+
+          # --- اجرای مرورگر ابری (noVNC + Chrome) ---
+          export DISPLAY=:1
+          nohup Xvfb :1 -screen 0 1920x1080x24 -ac > /dev/null 2>&1 &
+          sleep 1
+          nohup fluxbox > /dev/null 2>&1 &
+          sleep 1
+          nohup google-chrome-stable \
+            --no-sandbox --disable-gpu --disable-dev-shm-usage \
+            --start-maximized --no-first-run --disable-default-apps \
+            > /dev/null 2>&1 &
+          sleep 2
+          nohup x11vnc -display :1 -passwd "$PRX_USER_PASS" \
+            -forever -shared -rfbport 5900 -quiet > /dev/null 2>&1 &
+          sleep 1
+          nohup websockify --web=/usr/share/novnc/ 6080 localhost:5900 > /dev/null 2>&1 &
+          sleep 1
+
+          if curl -sf http://127.0.0.1:6080/ > /dev/null 2>&1; then
+            echo "✅ مرورگر ابری اجرا شد."
+          else
+            echo "⚠️ خطا در اجرای مرورگر ابری."
+          fi
+
+          # --- شروع تونل Cloudflare با QUIC ---
+          CURRENT_PROTO="quic"
+          echo "$CURRENT_PROTO" > /tmp/cf_proto.txt
+
+          sudo nohup /usr/local/bin/cloudflared tunnel \
+            --protocol $CURRENT_PROTO \
+            --url http://127.0.0.1:8000 \
+            --no-autoupdate \
+            --edge-ip-version 4 \
+            --grace-period 20s \
+            --retries 15 \
+            run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+          CF_PID=$!
+          sleep 5
+
+          if ps -p $CF_PID > /dev/null 2>&1; then
+            echo "✅ Cloudflare Tunnel با پروتکل $CURRENT_PROTO اجرا شد (PID: $CF_PID)"
+          else
+            echo "⚠️ QUIC ناموفق — تلاش با HTTP/2..."
+            CURRENT_PROTO="http2"
+            echo "$CURRENT_PROTO" > /tmp/cf_proto.txt
+            sudo nohup /usr/local/bin/cloudflared tunnel \
+              --protocol $CURRENT_PROTO \
+              --url http://127.0.0.1:8000 \
+              --no-autoupdate \
+              --edge-ip-version 4 \
+              --grace-period 20s \
+              --retries 15 \
+              run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+            sleep 5
+            echo "✅ Cloudflare Tunnel با فالبک $CURRENT_PROTO اجرا شد."
+          fi
+
+          # --- اسکریپت مانیتورینگ هوشمند — بالانس سرعت واکنش و پایداری ---
+          # ذخیره توکن در فایل برای دسترسی مانیتور (sudo محیط رو ریست می‌کنه)
+          echo "$CF_TOKEN" > /tmp/.cf_token
+          chmod 600 /tmp/.cf_token
+
+          cat <<'MONITOR' | sudo tee /usr/local/bin/tunnel_monitor.sh > /dev/null
+          #!/bin/bash
+          CF_TOKEN=$(cat /tmp/.cf_token 2>/dev/null)
+          ERROR_THRESHOLD=5
+          CHECK_INTERVAL=15
+          HEALTH_CHECK_URL="http://127.0.0.1:8000/health"
+          COOLDOWN=90
+          LAST_SWAP=0
+
+          log() {
+            echo "$(date '+%Y-%m-%d %H:%M:%S') $1" >> /tmp/tunnel_monitor.log
+          }
+
+          log "🚀 مانیتور شروع به کار کرد"
+
+          while true; do
+            sleep $CHECK_INTERVAL
+
+            NOW=$(date +%s)
+            SINCE_SWAP=$((NOW - LAST_SWAP))
+
+            # جلوگیری از سوئیچ مکرر (Cooldown)
+            if [ "$SINCE_SWAP" -lt "$COOLDOWN" ]; then
+              continue
+            fi
+
+            # بررسی سلامت Nginx
+            HEALTH=$(curl -sf -m 3 "$HEALTH_CHECK_URL" 2>/dev/null)
+            NGINX_OK=$?
+
+            # بررسی ارورهای تونل
+            RECENT_ERRORS=$(tail -100 /tmp/cf_tunnel.log 2>/dev/null | grep -ciE "EOF|stream error|timeout|connection reset|quic.*error|http2.*error|register tunnel|server misbehaving")
+
+            # بررسی اینکه آیا cloudflared هنوز زنده‌ست
+            CF_ALIVE=$(pgrep -c -f "cloudflared tunnel" 2>/dev/null || echo "0")
+
+            # بررسی و ری‌استارت Nginx در صورت نیاز
+            if [ "$NGINX_OK" -ne 0 ]; then
+              log "⚠️ Nginx پاسخ نمیده — ری‌استارت..."
+              sudo systemctl restart nginx
+            fi
+
+            # تصمیم‌گیری: سوئیچ لازمه؟
+            NEED_SWAP=false
+
+            if [ "$CF_ALIVE" -eq 0 ]; then
+              log "💀 cloudflared مرده — نیاز به ری‌استارت"
+              NEED_SWAP=true
+            elif [ "$RECENT_ERRORS" -ge "$ERROR_THRESHOLD" ]; then
+              log "⚠️ تعداد ارور بالا: $RECENT_ERRORS — نیاز به سوئیچ"
+              NEED_SWAP=true
+            fi
+
+            if [ "$NEED_SWAP" = true ]; then
+              CURRENT=$(cat /tmp/cf_proto.txt 2>/dev/null || echo "quic")
+
+              if [ "$CURRENT" = "quic" ]; then
+                NEXT="http2"
+              else
+                NEXT="quic"
+              fi
+
+              log "🔄 شروع Hot-Swap: $CURRENT → $NEXT"
+
+              # ذخیره PID تونل فعلی
+              OLD_PID=$(pgrep -f "cloudflared tunnel" | head -1)
+
+              # انتقال لاگ قبلی (fd قدیمی همچنان به inode قبلی اشاره می‌کنه)
+              sudo mv /tmp/cf_tunnel.log /tmp/cf_tunnel_old.log 2>/dev/null
+
+              # اول تونل جدید رو بالا بیار (لاگ مستقیم روی فایل اصلی)
+              sudo nohup /usr/local/bin/cloudflared tunnel \
+                --protocol $NEXT \
+                --url http://127.0.0.1:8000 \
+                --no-autoupdate \
+                --edge-ip-version 4 \
+                --grace-period 20s \
+                --retries 15 \
+                run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
+              NEW_PID=$!
+
+              # صبر تا تونل جدید آماده بشه
+              sleep 10
+
+              # بررسی سلامت تونل جدید
+              if ps -p $NEW_PID > /dev/null 2>&1; then
+                # تونل جدید سالمه — قبلی رو بکش
+                if [ -n "$OLD_PID" ]; then
+                  sudo kill "$OLD_PID" 2>/dev/null
+                  sleep 2
+                  # اگه هنوز زنده‌ست force kill
+                  sudo kill -9 "$OLD_PID" 2>/dev/null
+                fi
+
+                echo "$NEXT" > /tmp/cf_proto.txt
+                sudo rm -f /tmp/cf_tunnel_old.log 2>/dev/null
+                LAST_SWAP=$NOW
+
+                log "✅ Hot-Swap موفق: $NEXT فعال (بدون قطعی)"
+              else
+                log "❌ تونل جدید ($NEXT) ناموفق — ماندن روی $CURRENT"
+                sudo kill "$NEW_PID" 2>/dev/null
+                # بازگرداندن لاگ اصلی
+                sudo mv /tmp/cf_tunnel_old.log /tmp/cf_tunnel.log 2>/dev/null
+              fi
+            fi
+          done
+          MONITOR
+          sudo chmod +x /usr/local/bin/tunnel_monitor.sh
+
+          # اجرای مانیتور
+          sudo nohup /usr/local/bin/tunnel_monitor.sh > /dev/null 2>&1 &
+          echo "✅ مانیتور هوشمند تونل فعال شد."
+
+      - name: 6. Generate Connection Info & 6-Hour Keep Alive
+        run: |
+          VLESS_LINK="vless://$PRX_UUID@$PRX_DOMAIN:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=$PRX_DOMAIN&host=$PRX_DOMAIN&alpn=h2%2Chttp%2F1.1&fp=chrome#PRX-Ultra"
+
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║  🎉 ULTRA OPTIMIZED WORKSTATION & PROXY IS RUNNING!    ║"
+          echo "╠══════════════════════════════════════════════════════════╣"
+          echo "║                                                        ║"
+          printf "║  🌐 Web Terminal:  https://%s\n" "$PRX_DOMAIN"
+          echo "║  🔐 Login:         prxcore / [Secret Protected]        ║"
+          printf "║  💻 Cloud Browser: https://%s/browser/vnc.html\n" "$PRX_DOMAIN"
+          echo "║  🔑 VNC Password:   [Same as Login Password]            ║"
+          echo "║                                                        ║"
+          echo "╠══════════════════════════════════════════════════════════╣"
+          echo "║  ⚡ Optimizations Applied:                              ║"
+          echo "║    ✅ BBR Congestion Control                           ║"
+          echo "║    ✅ TCP Fast Open + No Delay                         ║"
+          echo "║    ✅ SACK/DSACK/Timestamps (Fast Recovery)            ║"
+          echo "║    ✅ 2x Kernel Buffers (64MB max)                     ║"
+          echo "║    ✅ Balanced Keepalive (45s/5s/6 = 75s tolerance)    ║"
+          echo "║    ✅ Xray 4MB Buffer + BBR sockopt                    ║"
+          echo "║    ✅ Xray routeOnly Sniffing (Less Overhead)          ║"
+          echo "║    ✅ Nginx 256 Upstream Keepalive                     ║"
+          echo "║    ✅ Smart Monitor (15s/5-err/90s cooldown)           ║"
+          echo "║    ✅ Smart Tunnel Hot-Swap                            ║"
+          echo "╠══════════════════════════════════════════════════════════╣"
+          echo "║  🚀 VLESS Connection Link:                             ║"
+          echo "╚══════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "$VLESS_LINK"
+          echo ""
+
+          # ⚠️ QR Code حذف شد — دلیل: روی ریپوی عمومی گیت‌هاب نمی‌تونه ماسک بشه
+          # اگه ریپوت Private هست و می‌خوای QR داشته باشی، خط زیر رو از کامنت دربیار:
+          # qrencode -t ANSIUTF8 "$VLESS_LINK" 2>/dev/null || echo "(qrencode not available)"
+
+          echo ""
+          echo "⏱️ سرور تا ۶ ساعت فعال می‌ماند..."
+          echo "=================================================="
+
+          # Keep-Alive با نمایش وضعیت
+          for i in $(seq 1 360); do
+            sleep 60
+
+            # هر ۱۰ دقیقه وضعیت کامل نشون بده
+            if [ $((i % 10)) -eq 0 ]; then
+              PROTO=$(cat /tmp/cf_proto.txt 2>/dev/null || echo "unknown")
+              CF_UP=$(pgrep -c -f "cloudflared tunnel" 2>/dev/null || echo "0")
+              XRAY_UP=$(pgrep -c -f "xray" 2>/dev/null || echo "0")
+              SWAP_COUNT=$(grep -c "Hot-Swap موفق" /tmp/tunnel_monitor.log 2>/dev/null || echo "0")
+
+              echo "[$i/360] 📊 Status: Proto=$PROTO | CF=$CF_UP | Xray=$XRAY_UP | Swaps=$SWAP_COUNT"
+            else
+              echo "[$i/360] 🟢 Running on $PRX_DOMAIN"
+            fi
+          done
+
+          echo "⏰ ۶ ساعت تمام شد. سرور خاموش می‌شود."
+
     timeout-minutes: 360
 
     env:
