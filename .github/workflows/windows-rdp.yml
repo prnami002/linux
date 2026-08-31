@@ -120,8 +120,7 @@ jobs:
 
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            neofetch htop tmux curl wget nginx qrencode jq \
-            xvfb fluxbox x11vnc novnc python3-websockify -qq
+            neofetch htop tmux curl wget nginx qrencode jq -qq
 
           # دانلود ttyd
           sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
@@ -384,14 +383,16 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === مرورگر ابری (noVNC) ===
+              # === مرورگر ابری (Kasm WebRTC) ===
               location /browser/ {
-                  proxy_pass http://127.0.0.1:6080/;
+                  proxy_pass https://127.0.0.1:6901/;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection "upgrade";
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
                   proxy_buffering off;
                   proxy_read_timeout 86400s;
                   proxy_send_timeout 86400s;
@@ -436,27 +437,23 @@ jobs:
             echo "⚠️ خطا در اجرای وب‌ترمینال."
           fi
 
-          # --- اجرای مرورگر ابری (noVNC + Chrome) ---
-          export DISPLAY=:1
-          nohup Xvfb :1 -screen 0 1920x1080x24 -ac > /dev/null 2>&1 &
-          sleep 1
-          nohup fluxbox > /dev/null 2>&1 &
-          sleep 1
-          nohup google-chrome-stable \
-            --no-sandbox --disable-gpu --disable-dev-shm-usage \
-            --start-maximized --no-first-run --disable-default-apps \
-            > /dev/null 2>&1 &
-          sleep 2
-          nohup x11vnc -display :1 -passwd "$PRX_USER_PASS" \
-            -forever -shared -rfbport 5900 -quiet > /dev/null 2>&1 &
-          sleep 1
-          nohup websockify --web=/usr/share/novnc/ 6080 localhost:5900 > /dev/null 2>&1 &
-          sleep 1
+          # --- اجرای مرورگر ابری (Kasm Chrome — WebRTC با فالبک TCP) ---
+          sudo docker run -d \
+            --name=kasm-chrome \
+            --shm-size="2g" \
+            -p 6901:6901 \
+            -e VNC_PW="$PRX_USER_PASS" \
+            -e KASM_PORT=6901 \
+            --restart unless-stopped \
+            kasmweb/chrome:1.16.1 \
+            > /dev/null 2>&1
+          sleep 8
 
-          if curl -sf http://127.0.0.1:6080/ > /dev/null 2>&1; then
-            echo "✅ مرورگر ابری اجرا شد."
+          if sudo docker ps | grep -q kasm-chrome; then
+            echo "✅ مرورگر ابری Kasm (WebRTC) اجرا شد."
           else
-            echo "⚠️ خطا در اجرای مرورگر ابری."
+            echo "⚠️ خطا در اجرای مرورگر ابری:"
+            sudo docker logs kasm-chrome 2>&1 | tail -5
           fi
 
           # --- شروع تونل Cloudflare با QUIC ---
@@ -622,8 +619,8 @@ jobs:
           echo "║                                                        ║"
           printf "║  🌐 Web Terminal:  https://%s\n" "$PRX_DOMAIN"
           echo "║  🔐 Login:         prxcore / [Secret Protected]        ║"
-          printf "║  💻 Cloud Browser: https://%s/browser/vnc.html\n" "$PRX_DOMAIN"
-          echo "║  🔑 VNC Password:   [Same as Login Password]            ║"
+          printf "║  💻 Cloud Browser: https://%s/browser/\n" "$PRX_DOMAIN"
+          echo "║  🔑 Browser Pass:  [Same as Login Password]             ║"
           echo "║                                                        ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║  ⚡ Optimizations Applied:                              ║"
