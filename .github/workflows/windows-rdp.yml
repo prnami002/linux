@@ -1,4 +1,4 @@
-name: prxcore All-in-One Dedicated Workstation & Proxy (Ultra Optimized + Kasm Browser)
+name: prxcore Beast Workstation & Ultra Low-Latency Remote Browser (KasmVNC + Xray)
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
       PRX_USER_PASS: ${{ secrets.PRX_USER_PASS }}
 
     steps:
-      - name: 1. Validate Secrets & Deep Kernel Network Tuning (BBR + FastOpen + Buffer)
+      - name: 1. Validate Secrets & Deep Kernel Network Tuning (BBR + FastOpen + Low-Latency TCP)
         run: |
           # --- اعتبارسنجی سکرت‌ها ---
           if [ -z "$CF_TOKEN" ] || [ -z "$PRX_DOMAIN" ] || [ -z "$PRX_UUID" ] || [ -z "$PRX_USER_PASS" ]; then
@@ -24,16 +24,26 @@ jobs:
           fi
           echo "✅ تمام سکرت‌ها تأیید شدند."
 
-          # --- فعال‌سازی BBR (الگوریتم کنترل ازدحام گوگل) ---
+          # --- فعال‌سازی ماژول BBR در هسته لینوکس ---
           sudo modprobe tcp_bbr 2>/dev/null || true
           echo "tcp_bbr" | sudo tee -a /etc/modules-load.d/bbr.conf > /dev/null
 
-          # --- تنظیمات عمیق کرنل — حداکثر سرعت و حداقل لیتنسی ---
+          # --- بهینه‌سازی تهاجمی کرنل برای کاهش لیتنسی و بهره‌برداری از سخت‌افزار و پهنای باند غول ---
           sudo tee /etc/sysctl.d/99-prxcore-optimize.conf > /dev/null <<'SYSCTL'
+          # === BBR Congestion Control ===
           net.core.default_qdisc = fq
           net.ipv4.tcp_congestion_control = bbr
+
+          # === TCP Fast Open همزمان برای ارسال و دریافت سریع دسکتاپ ===
           net.ipv4.tcp_fastopen = 3
+
+          # === حذف وقفه Slow Start پس از بی‌کاری سوکت ===
           net.ipv4.tcp_slow_start_after_idle = 0
+
+          # === کاهش فوق‌العاده Bufferbloat و لیتنسی ریموت دسکتاپ (فوری‌ترین پاسخ به موس/کیبورد) ===
+          net.ipv4.tcp_notsent_lowat = 16384
+
+          # === بافرهای غول‌پیکر شبکه (۶۴ مگابایت) برای نرخ فریم و کیفیت تصویر ۶۰fps ===
           net.core.rmem_default = 2097152
           net.core.rmem_max = 67108864
           net.core.wmem_default = 2097152
@@ -43,6 +53,8 @@ jobs:
           net.core.somaxconn = 65535
           net.core.netdev_max_backlog = 250000
           net.core.optmem_max = 65536
+
+          # === تنظیمات Window Scaling و ریکاوری بلادرنگ پکت‌ها ===
           net.ipv4.tcp_window_scaling = 1
           net.ipv4.tcp_adv_win_scale = -2
           net.ipv4.tcp_sack = 1
@@ -53,14 +65,20 @@ jobs:
           net.ipv4.tcp_fin_timeout = 15
           net.ipv4.tcp_tw_reuse = 1
           net.ipv4.tcp_max_tw_buckets = 2000000
+
+          # === Keepalive بهینه (تست سلامت سریع کانکشن) ===
           net.ipv4.tcp_keepalive_time = 45
           net.ipv4.tcp_keepalive_intvl = 5
           net.ipv4.tcp_keepalive_probes = 6
+
+          # === امنیت و صف ورودی بالا ===
           net.ipv4.tcp_syncookies = 1
           net.ipv4.tcp_max_syn_backlog = 65535
           net.ipv4.tcp_mtu_probing = 1
           net.ipv4.ip_local_port_range = 1024 65535
           net.ipv4.tcp_ecn = 0
+
+          # === ARP و غیرفعال‌سازی IPv6 برای مسیردهی مستقیم ===
           net.ipv4.neigh.default.gc_thresh1 = 1024
           net.ipv4.neigh.default.gc_thresh2 = 4096
           net.ipv4.neigh.default.gc_thresh3 = 8192
@@ -69,9 +87,9 @@ jobs:
           SYSCTL
 
           sudo sysctl --system > /dev/null 2>&1
-          echo "✅ تنظیمات کرنل و BBR اعمال شدند."
+          echo "✅ تنظیمات کرنل، BBR و کاهش لیتنسی اعمال شدند."
 
-      - name: 2. Setup Secure User, Dependencies & Deploy Kasm Chromium
+      - name: 2. Setup Secure User, Dependencies & Deploy Extreme Kasm Chromium
         run: |
           sudo useradd -m -s /bin/bash prxcore
           echo "prxcore:$PRX_USER_PASS" | sudo chpasswd
@@ -90,20 +108,24 @@ jobs:
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-          # اجرای کانتینر فوق‌بهینه Kasm Chromium روی پورت ۳۰۰۰
+          # اجرای کانتینر ریموت بروزر فوق‌سریع بر پایه KasmVNC با احراز هویت و حداکثر منابع
+          # ۸ گیگابایت حافظه اشتراکی + استفاده از تمام ترد‌های CPU برای رندر فوری
           sudo docker run -d \
             --name=kasm-chrome \
             -p 127.0.0.1:3000:3000 \
-            --shm-size=4g \
+            --shm-size=8g \
+            --ipc=host \
             -e PUID=1000 \
             -e PGID=1000 \
             -e TZ=Etc/UTC \
             -e LC_ALL=en_US.UTF-8 \
-            -e CHROME_CLI="--disable-dev-shm-usage --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy" \
+            -e CUSTOM_USER=prxcore \
+            -e PASSWORD="$PRX_USER_PASS" \
+            -e CHROME_CLI="--no-sandbox --disable-dev-shm-usage --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --num-raster-threads=8 --enable-accelerated-2d-canvas --enable-features=CanvasOopRasterization" \
             --restart unless-stopped \
             lscr.io/linuxserver/chromium:latest
 
-          echo "✅ تمام وابستگی‌ها و کانتینر Kasm Chromium نصب و مستقر شدند."
+          echo "✅ تمام پیش‌نیازها و کانتینر روان Kasm Chromium با موفقیت مستقر شدند."
 
       - name: 3. Install & Configure Xray-Core (Fully Optimized VLESS WS)
         run: |
@@ -239,7 +261,7 @@ jobs:
             exit 1
           fi
 
-      - name: 4. Configure Nginx High-Performance Multiplexer (Port 8000)
+      - name: 4. Configure Nginx Ultra Multiplexer (No-Lag WebSocket & Map Handling)
         run: |
           cat <<'MAIN' | sudo tee /etc/nginx/nginx.conf
           user www-data;
@@ -254,6 +276,12 @@ jobs:
           }
 
           http {
+              # === تعریف نقشه داینامیک وب‌سوکت برای لود بدون نقص فایل‌های استاتیک و استریم ===
+              map $http_upgrade $connection_upgrade {
+                  default upgrade;
+                  '' close;
+              }
+
               sendfile on;
               tcp_nopush on;
               tcp_nodelay on;
@@ -287,7 +315,7 @@ jobs:
 
           upstream kasm_backend {
               server 127.0.0.1:3000;
-              keepalive 128;
+              keepalive 256;
           }
 
           server {
@@ -295,13 +323,14 @@ jobs:
               server_name _;
               client_max_body_size 0;
 
-              # === ۱. مسیر پروکسی VLESS WS ===
+              # === ۱. مسیر پروکسی فیلترشکن VLESS WS (بدون لاگ دیسک) ===
               location /prx-stream {
+                  access_log off;
                   proxy_redirect off;
                   proxy_pass http://xray_backend;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Connection $connection_upgrade;
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -315,12 +344,12 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === ۲. مسیر وب‌ترمینال (ttyd) ===
+              # === ۲. مسیر وب‌ترمینال لینوکس (ttyd) ===
               location ^~ /terminal/ {
                   proxy_pass http://ttyd_backend;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Connection $connection_upgrade;
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -332,17 +361,18 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === ۳. مسیر اصلی: ریموت بروزر Kasm Chromium ===
+              # === ۳. مسیر اصلی: ریموت بروزر پرسرعت Kasm Chromium (بلادرنگ و بدون تاخیر) ===
               location / {
                   proxy_pass http://kasm_backend;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Connection $connection_upgrade;
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto $scheme;
 
+                  # خاموش کردن بافرینگ برای دریافت آنی فریم‌های تصویر و موس
                   proxy_buffering off;
                   proxy_request_buffering off;
                   proxy_connect_timeout 2s;
@@ -351,7 +381,7 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === ۴. وضعیت سلامت ===
+              # === ۴. وضعیت سلامت سرور ===
               location /health {
                   access_log off;
                   default_type application/json;
@@ -363,7 +393,7 @@ jobs:
           sudo nginx -t
           if [ $? -eq 0 ]; then
             sudo systemctl restart nginx
-            echo "✅ Nginx مالتی‌پلکسر با موفقیت ریلود شد."
+            echo "✅ Nginx مالتی‌پلکسر با بهینه‌سازی جدید اجرا شد."
           else
             echo "❌ خطا در کانفیگ Nginx!"
             exit 1
@@ -371,7 +401,7 @@ jobs:
 
       - name: 5. Launch Services & Smart Cloudflare Tunnel (Advanced Auto-Fallback)
         run: |
-          # اجرای ttyd روی مسیر پایه /terminal
+          # اجرای ttyd روی پورت 7681 با پیشوند مسیر /terminal
           sudo nohup /usr/local/bin/ttyd \
             -c "prxcore:$PRX_USER_PASS" \
             -W \
@@ -383,6 +413,7 @@ jobs:
             tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
+          # شروع تونل با پروتکل QUIC
           CURRENT_PROTO="quic"
           echo "$CURRENT_PROTO" > /tmp/cf_proto.txt
 
@@ -391,7 +422,7 @@ jobs:
             --url http://127.0.0.1:8000 \
             --no-autoupdate \
             --edge-ip-version 4 \
-            --grace-period 20s \
+            --grace-period 10s \
             --retries 15 \
             run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
           CF_PID=$!
@@ -400,7 +431,7 @@ jobs:
           if ps -p $CF_PID > /dev/null 2>&1; then
             echo "✅ Cloudflare Tunnel با پروتکل $CURRENT_PROTO اجرا شد (PID: $CF_PID)"
           else
-            echo "⚠️ QUIC ناموفق — تلاش با HTTP/2..."
+            echo "⚠️ QUIC ناموفق — فالبک فوری به HTTP/2..."
             CURRENT_PROTO="http2"
             echo "$CURRENT_PROTO" > /tmp/cf_proto.txt
             sudo nohup /usr/local/bin/cloudflared tunnel \
@@ -408,14 +439,14 @@ jobs:
               --url http://127.0.0.1:8000 \
               --no-autoupdate \
               --edge-ip-version 4 \
-              --grace-period 20s \
+              --grace-period 10s \
               --retries 15 \
               run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
             sleep 5
-            echo "✅ Cloudflare Tunnel با فالبک $CURRENT_PROTO اجرا شد."
+            echo "✅ Cloudflare Tunnel با پروتکل $CURRENT_PROTO اجرا شد."
           fi
 
-          # مانیتورینگ هوشمند تونل
+          # مانیتورینگ هوشمند پایداری تونل
           echo "$CF_TOKEN" > /tmp/.cf_token
           chmod 600 /tmp/.cf_token
 
@@ -470,7 +501,7 @@ jobs:
                 --url http://127.0.0.1:8000 \
                 --no-autoupdate \
                 --edge-ip-version 4 \
-                --grace-period 20s \
+                --grace-period 10s \
                 --retries 15 \
                 run --token "$CF_TOKEN" > /tmp/cf_tunnel.log 2>&1 &
               NEW_PID=$!
@@ -502,19 +533,22 @@ jobs:
 
           echo ""
           echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🎉 ULTRA OPTIMIZED WORKSTATION + BROWSER RUNNING!     ║"
+          echo "║  🎉 ULTRA LOW-LATENCY WORKSTATION & BROWSER ACTIVE!   ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║                                                        ║"
           printf "║  🚀 Remote Browser: https://%s\n" "$PRX_DOMAIN"
           printf "║  💻 Web Terminal:   https://%s/terminal/\n" "$PRX_DOMAIN"
-          echo "║  🔐 Terminal Login: prxcore / [Secret Protected]       ║"
+          echo "║  🔐 Login Username: prxcore                            ║"
+          echo "║  🔐 Password:       [Defined in PRX_USER_PASS Secret]  ║"
           echo "║                                                        ║"
           echo "╠══════════════════════════════════════════════════════════╣"
-          echo "║  ⚡ Optimizations Applied:                              ║"
-          echo "║    ✅ Kasm Chromium (4GB SHM + Zero-Copy WebP Engine)  ║"
-          echo "║    ✅ BBR Congestion Control + Kernel Buffers          ║"
-          echo "║    ✅ TCP Fast Open + WebSocket Multiplexing           ║"
-          echo "║    ✅ Smart Cloudflare Tunnel (QUIC/H2 Fallback)       ║"
+          echo "║  ⚡ Ultra Optimizations Applied:                        ║"
+          echo "║    ✅ 8GB Shared RAM (shm) + Host IPC Mode             ║"
+          echo "║    ✅ 8 Parallel Raster CPU Threads (Instant Render)   ║"
+          echo "║    ✅ TCP_NOTSENT_LOWAT (Zero Bufferbloat / Ultra Low RTT)║"
+          echo "║    ✅ BBR Congestion Control + 64MB Massive Buffers    ║"
+          echo "║    ✅ Nginx Dynamic Map (Clean HTTP/WebSocket Split)   ║"
+          echo "║    ✅ Protected Kasm Authentication (prxcore)          ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║  🚀 VLESS Connection Link:                             ║"
           echo "╚══════════════════════════════════════════════════════════╝"
