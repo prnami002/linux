@@ -1,41 +1,41 @@
-name: Quick Remote Browser
+name: Neko WebRTC Remote Browser
 
 on:
   workflow_dispatch:
 
 jobs:
-  run-browser:
+  launch-neko:
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Deploy Chromium Container
+      - name: 1. Deploy Neko Container (Chromium)
         run: |
           docker run -d \
-            --name=quick-browser \
-            -p 3000:3000 \
-            --shm-size=4g \
-            -e PUID=1000 \
-            -e PGID=1000 \
-            -e TZ=Etc/UTC \
-            -e LC_ALL=en_US.UTF-8 \
+            --name=neko-browser \
+            --shm-size=2g \
+            -p 8080:8080 \
+            -e NEKO_SCREEN="1280x720@30" \
+            -e NEKO_PASSWORD="user123" \
+            -e NEKO_PASSWORD_ADMIN="admin123" \
+            -e NEKO_ICELITE=1 \
+            -e NEKO_ICESERVERS='[{"urls":["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302"]}]' \
             --restart unless-stopped \
-            lscr.io/linuxserver/chromium:latest
+            ghcr.io/m1k1o/neko/chromium:latest
 
       - name: 2. Start Cloudflare Quick Tunnel
         run: |
-          # دانلود و نصب آخرین نسخه cloudflared
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
 
-          # اجرای کوییک تانل و ذخیره لاگ برای استخراج URL
-          cloudflared tunnel --url http://localhost:3000 > tunnel.log 2>&1 &
+          # اجرای تونل روی پورت 8080
+          cloudflared tunnel --url http://localhost:8080 > tunnel.log 2>&1 &
 
-          # منتظر ماندن و استخراج لینک اتصال
+          # استخراج لینک موقت اتصال
           sleep 5
           for i in {1..15}; do
             URL=$(grep -o 'https://[-a-zA-Z0-9@:%._\+~#=]\+\.trycloudflare\.com' tunnel.log | head -n 1)
             if [ -n "$URL" ]; then
               echo "=================================================="
-              echo "  🚀 Remote Browser URL: $URL"
+              echo "  🚀 Neko WebRTC URL: $URL"
               echo "=================================================="
               break
             fi
@@ -44,5 +44,5 @@ jobs:
 
       - name: 3. Keep Alive
         run: |
-          echo "Browser is running. Keep this tab open or access via URL."
+          echo "Neko is running. Keep this session alive."
           sleep 21600
