@@ -15,6 +15,15 @@ jobs:
       PRX_USER_PASS: ${{ secrets.PRX_USER_PASS }}
 
     steps:
+      # === بازیابی سشن‌ها و کوکی‌های قبلی مرورگر ===
+      - name: 0. Restore Persistent Browser Profile & Cookies
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/kasm_data
+          key: kasm-profile-${{ github.run_id }}
+          restore-keys: |
+            kasm-profile-
+
       - name: 1. Validate Secrets & Deep Kernel Network Tuning (BBR + FastOpen + Low-Latency TCP)
         run: |
           # --- اعتبارسنجی سکرت‌ها ---
@@ -108,13 +117,18 @@ jobs:
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-          # اجرای کانتینر ریموت بروزر فوق‌سریع بر پایه KasmVNC با احراز هویت و حداکثر منابع
-          # ۸ گیگابایت حافظه اشتراکی + استفاده از تمام ترد‌های CPU برای رندر فوری
+          # آماده‌سازی دایرکتوری پایدار پروفایل و رفع قفل‌های احتمالی مرورگر
+          mkdir -p /home/runner/kasm_data
+          sudo rm -f /home/runner/kasm_data/Singleton* /home/runner/kasm_data/.config/chromium/Singleton* /home/runner/kasm_data/Default/Singleton* 2>/dev/null || true
+          sudo chown -R 1000:1000 /home/runner/kasm_data
+
+          # اجرای کانتینر ریموت بروزر فوق‌سریع بر پایه KasmVNC با احراز هویت و ذخیره‌سازی ابری
           sudo docker run -d \
             --name=kasm-chrome \
             -p 127.0.0.1:3000:3000 \
             --shm-size=8g \
             --ipc=host \
+            -v /home/runner/kasm_data:/config \
             -e PUID=1000 \
             -e PGID=1000 \
             -e TZ=Etc/UTC \
@@ -533,24 +547,25 @@ jobs:
 
           echo ""
           echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║  🎉 ULTRA LOW-LATENCY WORKSTATION & BROWSER ACTIVE!   ║"
+          echo "║   🎉 ULTRA LOW-LATENCY WORKSTATION & BROWSER ACTIVE!     ║"
           echo "╠══════════════════════════════════════════════════════════╣"
-          echo "║                                                        ║"
+          echo "║                                                          ║"
           printf "║  🚀 Remote Browser: https://%s\n" "$PRX_DOMAIN"
           printf "║  💻 Web Terminal:   https://%s/terminal/\n" "$PRX_DOMAIN"
-          echo "║  🔐 Login Username: prxcore                            ║"
+          echo "║  🔐 Login Username: prxcore                              ║"
           echo "║  🔐 Password:       [Defined in PRX_USER_PASS Secret]  ║"
-          echo "║                                                        ║"
+          echo "║                                                          ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║  ⚡ Ultra Optimizations Applied:                        ║"
-          echo "║    ✅ 8GB Shared RAM (shm) + Host IPC Mode             ║"
-          echo "║    ✅ 8 Parallel Raster CPU Threads (Instant Render)   ║"
+          echo "║    ✅ 8GB Shared RAM (shm) + Host IPC Mode              ║"
+          echo "║    ✅ 8 Parallel Raster CPU Threads (Instant Render)    ║"
           echo "║    ✅ TCP_NOTSENT_LOWAT (Zero Bufferbloat / Ultra Low RTT)║"
-          echo "║    ✅ BBR Congestion Control + 64MB Massive Buffers    ║"
-          echo "║    ✅ Nginx Dynamic Map (Clean HTTP/WebSocket Split)   ║"
+          echo "║    ✅ BBR Congestion Control + 64MB Massive Buffers     ║"
+          echo "║    ✅ Nginx Dynamic Map (Clean HTTP/WebSocket Split)    ║"
           echo "║    ✅ Protected Kasm Authentication (prxcore)          ║"
+          echo "║    ✅ Cloud Session Persistence (Auto Cookies/Logins)   ║"
           echo "╠══════════════════════════════════════════════════════════╣"
-          echo "║  🚀 VLESS Connection Link:                             ║"
+          echo "║  🚀 VLESS Connection Link:                              ║"
           echo "╚══════════════════════════════════════════════════════════╝"
           echo ""
           echo "$VLESS_LINK"
@@ -571,3 +586,11 @@ jobs:
             fi
           done
           echo "⏰ ۶ ساعت تمام شد. سرور خاموش می‌شود."
+
+      # === ذخیره‌سازی خودکار آخرین تغییرات سشن‌ها و کوکی‌ها در پایان ورک‌فلو ===
+      - name: 7. Save Persistent Browser Profile & Cookies
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/kasm_data
+          key: kasm-profile-${{ github.run_id }}
