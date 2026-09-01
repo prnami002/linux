@@ -120,7 +120,7 @@ jobs:
 
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            neofetch htop tmux curl wget nginx qrencode jq coturn -qq
+            neofetch htop tmux curl wget nginx qrencode jq -qq
 
           # دانلود ttyd
           sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
@@ -371,7 +371,7 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === مسیر مرورگر ریموت Neko (WebRTC) ===
+              # === مسیر مرورگر ریموت (KasmVNC) ===
               location / {
                   proxy_pass http://neko_backend;
                   proxy_http_version 1.1;
@@ -444,65 +444,32 @@ jobs:
             echo "⚠️ خطا در اجرای وب‌ترمینال."
           fi
 
-          # --- راه‌اندازی مرورگر ریموت Neko (WebRTC — کمترین لیتنسی) ---
-          PUBLIC_IP=$(curl -sf https://ifconfig.me || curl -sf https://api.ipify.org || echo "127.0.0.1")
-          echo "🌐 IP عمومی سرور: $PUBLIC_IP"
-
-          # --- راه‌اندازی TURN Server (ریلی WebRTC از طریق TCP) ---
-          sudo turnadmin -a -u neko -p "$PRX_USER_PASS" -r neko
-
-          echo "listening-port=443" > /tmp/turnserver.conf
-          echo "listening-ip=0.0.0.0" >> /tmp/turnserver.conf
-          echo "relay-ip=$PUBLIC_IP" >> /tmp/turnserver.conf
-          echo "external-ip=$PUBLIC_IP" >> /tmp/turnserver.conf
-          echo "min-port=49152" >> /tmp/turnserver.conf
-          echo "max-port=49252" >> /tmp/turnserver.conf
-          echo "lt-cred-mech" >> /tmp/turnserver.conf
-          echo "realm=neko" >> /tmp/turnserver.conf
-          echo "no-tls" >> /tmp/turnserver.conf
-          echo "no-dtls" >> /tmp/turnserver.conf
-          echo "fingerprint" >> /tmp/turnserver.conf
-          echo "log-file=/tmp/coturn.log" >> /tmp/turnserver.conf
-          sudo cp /tmp/turnserver.conf /etc/turnserver.conf
-
-          sudo nohup turnserver -c /etc/turnserver.conf > /dev/null 2>&1 &
-          sleep 2
-
-          if pgrep -f turnserver > /dev/null; then
-            echo "✅ TURN Server اجرا شد (TCP:443 — Relay برای WebRTC)."
-          else
-            echo "⚠️ TURN Server اجرا نشد."
-          fi
-
-          # --- تنظیم ICE Servers با TURN ---
-          NEKO_ICE="[{\"urls\":[\"stun:stun.l.google.com:19302\"]},{\"urls\":[\"turn:$PUBLIC_IP:443?transport=tcp\"],\"username\":\"neko\",\"credential\":\"$PRX_USER_PASS\"}]"
-
-          echo "⏳ در حال دانلود ایمیج Neko Firefox..."
-          if sudo docker pull ghcr.io/m1k1o/neko/firefox:latest; then
+          # --- راه‌اندازی مرورگر ریموت (KasmVNC + Firefox — WebSocket) ---
+          echo "⏳ در حال دانلود ایمیج Firefox..."
+          if sudo docker pull lscr.io/linuxserver/firefox:latest; then
             sudo docker run -d \
               --name neko \
               --network host \
               --shm-size=2g \
-              -e NEKO_SCREEN=1920x1080@30 \
-              -e NEKO_PASSWORD="$PRX_USER_PASS" \
-              -e NEKO_PASSWORD_ADMIN="$PRX_USER_PASS" \
-              -e NEKO_BIND=:3000 \
-              -e NEKO_EPR=52000-52100 \
-              -e NEKO_NAT1TO1="$PUBLIC_IP" \
-              -e NEKO_ICELITE=true \
-              -e NEKO_ICESERVERS="$NEKO_ICE" \
-              ghcr.io/m1k1o/neko/firefox:latest
+              -e PUID=1000 \
+              -e PGID=1000 \
+              -e CUSTOM_PORT=3000 \
+              -e CUSTOM_HTTPS_PORT=3001 \
+              -e CUSTOM_USER=prxcore \
+              -e PASSWORD="$PRX_USER_PASS" \
+              -e TITLE="PRXCore Browser" \
+              lscr.io/linuxserver/firefox:latest
 
-            sleep 10
+            sleep 15
 
             if sudo docker ps --format '{{.Names}}' | grep -q neko; then
-              echo "✅ مرورگر ریموت Neko اجرا شد (WebRTC + Firefox)."
+              echo "✅ مرورگر ریموت اجرا شد (KasmVNC + Firefox)."
             else
-              echo "❌ خطا در اجرای Neko:"
+              echo "❌ خطا در اجرای مرورگر ریموت:"
               sudo docker logs neko 2>&1 | tail -20
             fi
           else
-            echo "⚠️ دانلود ایمیج Neko ناموفق بود."
+            echo "⚠️ دانلود ایمیج Firefox ناموفق بود."
           fi
 
           # --- شروع تونل Cloudflare با QUIC ---
@@ -682,7 +649,7 @@ jobs:
           echo "║    ✅ Nginx 256 Upstream Keepalive                     ║"
           echo "║    ✅ Smart Monitor (15s/5-err/90s cooldown)           ║"
           echo "║    ✅ Smart Tunnel Hot-Swap                            ║"
-          echo "║    ✅ Neko Remote Browser (WebRTC + Firefox)           ║"
+          echo "║    ✅ KasmVNC Remote Browser (Firefox)                ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║  🚀 VLESS Connection Link:                             ║"
           echo "╚══════════════════════════════════════════════════════════╝"
