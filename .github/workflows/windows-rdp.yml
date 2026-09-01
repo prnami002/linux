@@ -127,7 +127,7 @@ jobs:
 
           # کاهش سرعت اسکرول عمودی با imwheel
           sleep 5
-          sudo docker exec kasm-chrome bash -c "apt-get update -qq && apt-get install -y -qq imwheel > /dev/null 2>&1 && mkdir -p /home/prxcore && printf '\".*\"\nNone,      Up,   Button4, 2\nNone,      Down, Button5, 2\n' > /home/prxcore/.imwheelrc && chown -R 1000:1000 /home/prxcore/.imwheelrc && (su - abc -c 'imwheel -b 45' 2>/dev/null || imwheel -b 45)"
+          sudo docker exec kasm-chrome bash -c "apt-get update -qq && apt-get install -y -qq imwheel > /dev/null 2>&1 && mkdir -p /home/prxcore && printf '\".*\"\nNone,      Up,   Button4, 1\nNone,      Down, Button5, 1\n' > /home/prxcore/.imwheelrc && chown -R 1000:1000 /home/prxcore/.imwheelrc && (su - abc -c 'imwheel -b 45' 2>/dev/null || imwheel -b 45)"
 
           echo "✅ تمام پیش‌نیازها و کانتینر ریموت بروزر با موفقیت مستقر شدند."
 
