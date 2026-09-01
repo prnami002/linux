@@ -451,20 +451,19 @@ jobs:
           # --- راه‌اندازی TURN Server (ریلی WebRTC از طریق TCP) ---
           sudo turnadmin -a -u neko -p "$PRX_USER_PASS" -r neko
 
-          sudo tee /etc/turnserver.conf > /dev/null <<TURNEOF
-listening-port=443
-listening-ip=0.0.0.0
-relay-ip=$PUBLIC_IP
-external-ip=$PUBLIC_IP
-min-port=49152
-max-port=49252
-lt-cred-mech
-realm=neko
-no-tls
-no-dtls
-fingerprint
-log-file=/tmp/coturn.log
-TURNEOF
+          echo "listening-port=443" > /tmp/turnserver.conf
+          echo "listening-ip=0.0.0.0" >> /tmp/turnserver.conf
+          echo "relay-ip=$PUBLIC_IP" >> /tmp/turnserver.conf
+          echo "external-ip=$PUBLIC_IP" >> /tmp/turnserver.conf
+          echo "min-port=49152" >> /tmp/turnserver.conf
+          echo "max-port=49252" >> /tmp/turnserver.conf
+          echo "lt-cred-mech" >> /tmp/turnserver.conf
+          echo "realm=neko" >> /tmp/turnserver.conf
+          echo "no-tls" >> /tmp/turnserver.conf
+          echo "no-dtls" >> /tmp/turnserver.conf
+          echo "fingerprint" >> /tmp/turnserver.conf
+          echo "log-file=/tmp/coturn.log" >> /tmp/turnserver.conf
+          sudo cp /tmp/turnserver.conf /etc/turnserver.conf
 
           sudo nohup turnserver -c /etc/turnserver.conf > /dev/null 2>&1 &
           sleep 2
