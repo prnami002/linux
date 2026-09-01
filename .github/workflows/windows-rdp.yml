@@ -108,18 +108,24 @@ jobs:
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-          # اجرای کانتینر رسمی ریموت بروزر فوق‌سریع بر پایه KasmVNC اصلی (kasmweb/chromium)
-          # ۲ گیگابایت حافظه اشتراکی بهینه (shm) + اتصال ایمن و پایا
+          # اجرای کانتینر ریموت بروزر فوق‌سریع بر پایه KasmVNC با احراز هویت و حداکثر منابع
+          # ۸ گیگابایت حافظه اشتراکی + استفاده از تمام ترد‌های CPU برای رندر فوری
           sudo docker run -d \
             --name=kasm-chrome \
-            -p 127.0.0.1:6901:6901 \
-            --shm-size=2g \
+            -p 127.0.0.1:3000:3000 \
+            --shm-size=8g \
             --ipc=host \
-            -e VNC_PW="$PRX_USER_PASS" \
+            -e PUID=1000 \
+            -e PGID=1000 \
+            -e TZ=Etc/UTC \
+            -e LC_ALL=en_US.UTF-8 \
+            -e CUSTOM_USER=prxcore \
+            -e PASSWORD="$PRX_USER_PASS" \
+            -e CHROME_CLI="--no-sandbox --disable-dev-shm-usage --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --num-raster-threads=8 --enable-accelerated-2d-canvas --enable-features=CanvasOopRasterization" \
             --restart unless-stopped \
-            kasmweb/chromium:1.16.0
+            lscr.io/linuxserver/chromium:latest
 
-          echo "✅ تمام پیش‌نیازها و کانتینر رسمی Kasm Chromium با موفقیت مستقر شدند."
+          echo "✅ تمام پیش‌نیازها و کانتینر ریموت بروزر با موفقیت مستقر شدند."
 
       - name: 3. Install & Configure Xray-Core (Fully Optimized VLESS WS)
         run: |
@@ -308,7 +314,7 @@ jobs:
           }
 
           upstream kasm_backend {
-              server 127.0.0.1:6901;
+              server 127.0.0.1:3000;
               keepalive 256;
           }
 
@@ -355,11 +361,9 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === ۳. مسیر اصلی: ریموت بروزر رسمی KasmVNC Chromium (بلادرنگ و بدون تاخیر) ===
+              # === ۳. مسیر اصلی: ریموت بروزر پرسرعت Kasm Chromium (بلادرنگ و بدون تاخیر) ===
               location / {
-                  proxy_pass https://kasm_backend;
-                  proxy_ssl_verify off;
-                  proxy_ssl_server_name on;
+                  proxy_pass http://kasm_backend;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection $connection_upgrade;
@@ -371,7 +375,7 @@ jobs:
                   # خاموش کردن بافرینگ برای دریافت آنی فریم‌های تصویر و موس
                   proxy_buffering off;
                   proxy_request_buffering off;
-                  proxy_connect_timeout 5s;
+                  proxy_connect_timeout 2s;
                   proxy_read_timeout 86400s;
                   proxy_send_timeout 86400s;
                   proxy_socket_keepalive on;
@@ -534,8 +538,7 @@ jobs:
           echo "║                                                        ║"
           printf "║  🚀 Remote Browser: https://%s\n" "$PRX_DOMAIN"
           printf "║  💻 Web Terminal:   https://%s/terminal/\n" "$PRX_DOMAIN"
-          echo "║  🔐 Browser User:   kasm_user (Official KasmVNC)       ║"
-          echo "║  🔐 Terminal User:  prxcore                            ║"
+          echo "║  🔐 Login Username: prxcore                            ║"
           echo "║  🔐 Password:       [Defined in PRX_USER_PASS Secret]  ║"
           echo "║                                                        ║"
           echo "╠══════════════════════════════════════════════════════════╣"
