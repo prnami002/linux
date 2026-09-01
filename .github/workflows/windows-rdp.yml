@@ -121,7 +121,7 @@ jobs:
             -e LC_ALL=en_US.UTF-8 \
             -e CUSTOM_USER=prxcore \
             -e PASSWORD="$PRX_USER_PASS" \
-            -e CHROME_CLI="--no-sandbox --disable-dev-shm-usage --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --num-raster-threads=8 --enable-accelerated-2d-canvas --enable-features=CanvasOopRasterization" \
+            -e CHROME_CLI="--no-sandbox --disable-dev-shm-usage --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --num-raster-threads=8 --enable-accelerated-2d-canvas --enable-features=CanvasOopRasterization --enable-smooth-scrolling --percent-based-scrolling" \
             --restart unless-stopped \
             lscr.io/linuxserver/chromium:latest
 
