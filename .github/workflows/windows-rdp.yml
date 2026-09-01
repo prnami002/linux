@@ -15,7 +15,7 @@ jobs:
       PRX_USER_PASS: ${{ secrets.PRX_USER_PASS }}
 
     steps:
-      # === بازیابی سشن‌ها و کوکی‌های قبلی مرورگر ===
+      # === ۰. بازیابی سشن‌ها، کوکی‌ها و افزونه‌های ذخیره‌شده از اجراهای قبلی ===
       - name: 0. Restore Persistent Browser Profile & Cookies
         uses: actions/cache/restore@v4
         with:
@@ -117,12 +117,14 @@ jobs:
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-          # آماده‌سازی دایرکتوری پایدار پروفایل و رفع قفل‌های احتمالی مرورگر
+          # آماده‌سازی دایرکتوری پایدار پروفایل و پاکسازی قفل‌های احتمالی
           mkdir -p /home/runner/kasm_data
-          sudo rm -f /home/runner/kasm_data/Singleton* /home/runner/kasm_data/.config/chromium/Singleton* /home/runner/kasm_data/Default/Singleton* 2>/dev/null || true
+          sudo rm -f /home/runner/kasm_data/Singleton* \
+                      /home/runner/kasm_data/.config/chromium/Singleton* \
+                      /home/runner/kasm_data/.config/chromium/Default/Singleton* 2>/dev/null || true
           sudo chown -R 1000:1000 /home/runner/kasm_data
 
-          # اجرای کانتینر ریموت بروزر فوق‌سریع بر پایه KasmVNC با احراز هویت و ذخیره‌سازی ابری
+          # اجرای کانتینر ریموت بروزر با مانت دایرکتوری پایدار
           sudo docker run -d \
             --name=kasm-chrome \
             -p 127.0.0.1:3000:3000 \
@@ -587,8 +589,28 @@ jobs:
           done
           echo "⏰ ۶ ساعت تمام شد. سرور خاموش می‌شود."
 
-      # === ذخیره‌سازی خودکار آخرین تغییرات سشن‌ها و کوکی‌ها در پایان ورک‌فلو ===
-      - name: 7. Save Persistent Browser Profile & Cookies
+      # === ۷. متوقف کردن ایمن کانتینر برای ذخیره نهایی کوکی‌ها و پاکسازی موقت‌ها ===
+      - name: 7. Gracefully Stop Browser & Clean Sockets
+        if: always()
+        run: |
+          echo "⏹️ متوقف کردن ایمن کانتینر برای ثبت نهایی کوکی‌ها..."
+          sudo docker stop kasm-chrome -t 10 2>/dev/null || true
+          
+          # حذف فایل‌های موقت، قفل‌ها و سوکت‌های لینوکسی که مانع کش شدن می‌شوند
+          sudo rm -rf /home/runner/kasm_data/.cache \
+                      /home/runner/kasm_data/Singleton* \
+                      /home/runner/kasm_data/.config/chromium/Singleton* \
+                      /home/runner/kasm_data/.config/chromium/Default/Singleton* \
+                      /home/runner/kasm_data/.X11-unix \
+                      /home/runner/kasm_data/tmp 2>/dev/null || true
+          
+          # آزادسازی دسترسی کامل جهت ساخت آرشیو کش
+          sudo chown -R runner:docker /home/runner/kasm_data
+          sudo chmod -R 777 /home/runner/kasm_data
+          echo "✅ داده‌های پروفایل با موفقیت آماده ذخیره‌سازی شدند."
+
+      # === ۸. ذخیره‌سازی آرشیو سشن‌ها و کوکی‌ها در گیت‌هاب ===
+      - name: 8. Save Persistent Browser Profile & Cookies
         if: always()
         uses: actions/cache/save@v4
         with:
