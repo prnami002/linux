@@ -120,7 +120,7 @@ jobs:
 
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            neofetch htop tmux curl wget nginx qrencode jq -qq
+            neofetch htop tmux curl wget nginx qrencode jq coturn -qq
 
           # دانلود ttyd
           sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
@@ -448,6 +448,36 @@ jobs:
           PUBLIC_IP=$(curl -sf https://ifconfig.me || curl -sf https://api.ipify.org || echo "127.0.0.1")
           echo "🌐 IP عمومی سرور: $PUBLIC_IP"
 
+          # --- راه‌اندازی TURN Server (ریلی WebRTC از طریق TCP) ---
+          sudo turnadmin -a -u neko -p "$PRX_USER_PASS" -r neko
+
+          sudo tee /etc/turnserver.conf > /dev/null <<TURNEOF
+listening-port=443
+listening-ip=0.0.0.0
+relay-ip=$PUBLIC_IP
+external-ip=$PUBLIC_IP
+min-port=49152
+max-port=49252
+lt-cred-mech
+realm=neko
+no-tls
+no-dtls
+fingerprint
+log-file=/tmp/coturn.log
+TURNEOF
+
+          sudo nohup turnserver -c /etc/turnserver.conf > /dev/null 2>&1 &
+          sleep 2
+
+          if pgrep -f turnserver > /dev/null; then
+            echo "✅ TURN Server اجرا شد (TCP:443 — Relay برای WebRTC)."
+          else
+            echo "⚠️ TURN Server اجرا نشد."
+          fi
+
+          # --- تنظیم ICE Servers با TURN ---
+          NEKO_ICE="[{\"urls\":[\"stun:stun.l.google.com:19302\"]},{\"urls\":[\"turn:$PUBLIC_IP:443?transport=tcp\"],\"username\":\"neko\",\"credential\":\"$PRX_USER_PASS\"}]"
+
           echo "⏳ در حال دانلود ایمیج Neko Firefox..."
           if sudo docker pull ghcr.io/m1k1o/neko/firefox:latest; then
             sudo docker run -d \
@@ -461,7 +491,7 @@ jobs:
               -e NEKO_EPR=52000-52100 \
               -e NEKO_NAT1TO1="$PUBLIC_IP" \
               -e NEKO_ICELITE=true \
-              -e NEKO_ICESERVERS='[{"urls":["stun:stun.l.google.com:19302","stun:stun1.l.google.com:19302"]}]' \
+              -e NEKO_ICESERVERS="$NEKO_ICE" \
               ghcr.io/m1k1o/neko/firefox:latest
 
             sleep 10
