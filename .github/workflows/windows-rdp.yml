@@ -28,7 +28,7 @@ jobs:
           sudo modprobe tcp_bbr 2>/dev/null || true
           echo "tcp_bbr" | sudo tee -a /etc/modules-load.d/bbr.conf > /dev/null
 
-          # --- بهینه‌سازی پیشرفته کرنل برای کمترین لیتنسی و بالاترین استریم وب‌سوکت ---
+          # --- بهینه‌سازی کرنل برای کمترین لیتنسی و استریم سریع ---
           sudo tee /etc/sysctl.d/99-prxcore-optimize.conf > /dev/null <<'SYSCTL'
           # === BBR Congestion Control ===
           net.core.default_qdisc = fq
@@ -38,7 +38,7 @@ jobs:
           net.ipv4.tcp_fastopen = 3
           net.ipv4.tcp_slow_start_after_idle = 0
 
-          # === بافرهای بهینه (جلوگیری از Bufferbloat و حفظ رندر روان) ===
+          # === بافرهای شبکه بهینه ===
           net.core.rmem_default = 2097152
           net.core.rmem_max = 67108864
           net.core.wmem_default = 2097152
@@ -48,19 +48,19 @@ jobs:
           net.core.somaxconn = 65535
           net.core.netdev_max_backlog = 250000
 
-          # === بازیابی سریع پکت‌لاس (SACK / Timestamps) ===
+          # === بازیابی سریع پکت‌لاس ===
           net.ipv4.tcp_sack = 1
           net.ipv4.tcp_dsack = 1
           net.ipv4.tcp_timestamps = 1
           net.ipv4.tcp_no_metrics_save = 1
           net.ipv4.tcp_frto = 2
 
-          # === آزادسازی سریع سوکت‌ها ===
+          # === آزادسازی سوکت‌ها ===
           net.ipv4.tcp_fin_timeout = 15
           net.ipv4.tcp_tw_reuse = 1
           net.ipv4.tcp_max_tw_buckets = 2000000
 
-          # === TCP Keepalive بهینه برای حفظ مداوم استریم ===
+          # === TCP Keepalive بهینه ===
           net.ipv4.tcp_keepalive_time = 30
           net.ipv4.tcp_keepalive_intvl = 5
           net.ipv4.tcp_keepalive_probes = 5
@@ -71,7 +71,6 @@ jobs:
           net.ipv4.ip_local_port_range = 1024 65535
           net.ipv4.tcp_ecn = 0
 
-          # غیرفعال‌سازی IPv6 جهت ثبات مسیر
           net.ipv6.conf.all.disable_ipv6 = 1
           net.ipv6.conf.default.disable_ipv6 = 1
           SYSCTL
@@ -88,7 +87,7 @@ jobs:
 
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            htop tmux curl wget nginx jq docker.io -qq
+            htop tmux curl wget nginx jq -qq
 
           # دانلود آخرین نسخه cloudflared
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
@@ -113,7 +112,7 @@ jobs:
             --shm-size=4g \
             kasmweb/chrome:1.15.0
 
-          # انتظار برای راه‌اندازی کامل وب‌سرور داخلی Kasm
+          # انتظار برای راه‌اندازی وب‌سرور داخلی Kasm
           echo "⏳ در حال آماده‌سازی مرورگر ابری..."
           for i in {1..30}; do
             if curl -k -s https://127.0.0.1:6901 > /dev/null; then
@@ -231,6 +230,12 @@ jobs:
               keepalive_timeout 120;
               keepalive_requests 100000;
 
+              # تنظیم استاندارد ارتقای پروتکل به وب‌سوکت
+              map $http_upgrade $connection_upgrade {
+                  default upgrade;
+                  ''      close;
+              }
+
               include /etc/nginx/mime.types;
               default_type application/octet-stream;
               include /etc/nginx/conf.d/*.conf;
@@ -254,19 +259,18 @@ jobs:
               server_name _;
               client_max_body_size 0;
 
-              # === مسیر اصلی: مرورگر ابری Kasm (WebRTC / KasmVNC 60fps) ===
+              # === مرورگر ابری Kasm (60fps KasmVNC / WebAudio) ===
               location / {
                   proxy_pass https://kasm_backend;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Connection $connection_upgrade;
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto https;
                   proxy_ssl_verify off;
 
-                  # خاموش کردن کامل بافر برای ارسال بلادرنگ فریم‌ها
                   proxy_buffering off;
                   proxy_request_buffering off;
                   tcp_nodelay on;
@@ -276,13 +280,13 @@ jobs:
                   proxy_send_timeout 86400s;
               }
 
-              # === مسیر پروکسی اختصاصی VLESS WS ===
+              # === مسیر اتصال اختصاصی VLESS WS ===
               location /prx-stream {
                   proxy_redirect off;
                   proxy_pass http://xray_backend;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Connection $connection_upgrade;
                   proxy_set_header Host $host;
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -298,7 +302,7 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === بررسی سلامت سیستم ===
+              # === بررسی وضعیت سلامت سرور ===
               location /health {
                   access_log off;
                   default_type application/json;
@@ -309,7 +313,7 @@ jobs:
 
           sudo nginx -t
           sudo systemctl restart nginx
-          echo "✅ Nginx به عنوان سوئیچ کم‌تأخیر راه‌اندازی شد."
+          echo "✅ Nginx به درستی پیکربندی و راه‌اندازی شد."
 
       - name: 6. Launch Smart Cloudflare Tunnel & Dynamic Monitor
         run: |
