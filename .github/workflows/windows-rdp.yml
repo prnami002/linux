@@ -121,11 +121,25 @@ jobs:
             -e LC_ALL=en_US.UTF-8 \
             -e CUSTOM_USER=prxcore \
             -e PASSWORD="$PRX_USER_PASS" \
-            -e CHROME_CLI="--no-sandbox --disable-dev-shm-usage --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --num-raster-threads=8 --enable-accelerated-2d-canvas --enable-features=CanvasOopRasterization --enable-smooth-scrolling --percent-based-scrolling" \
+            -e CHROME_CLI="--no-sandbox --disable-dev-shm-usage --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --num-raster-threads=8 --enable-accelerated-2d-canvas --enable-features=CanvasOopRasterization" \
             --restart unless-stopped \
             lscr.io/linuxserver/chromium:latest
 
-          echo "✅ تمام پیش‌نیازها و کانتینر روان Kasm Chromium با موفقیت مستقر شدند."
+          # کاهش سرعت اسکرول عمودی با imwheel
+          sleep 5
+          sudo docker exec kasm-chrome bash -c '
+            apt-get update -qq && apt-get install -y -qq imwheel > /dev/null 2>&1
+            mkdir -p /home/prxcore
+            cat > /home/prxcore/.imwheelrc << "IMCONF"
+".*"
+None,      Up,   Button4, 2
+None,      Down, Button5, 2
+IMCONF
+            chown -R 1000:1000 /home/prxcore/.imwheelrc
+            su - abc -c "imwheel -b 45" 2>/dev/null || imwheel -b 45
+          '
+
+          echo "✅ تمام پیش‌نیازها و کانتینر ریموت بروزر با موفقیت مستقر شدند."
 
       - name: 3. Install & Configure Xray-Core (Fully Optimized VLESS WS)
         run: |
