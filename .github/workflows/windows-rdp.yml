@@ -28,17 +28,13 @@ jobs:
           sudo modprobe tcp_bbr 2>/dev/null || true
           echo "tcp_bbr" | sudo tee -a /etc/modules-load.d/bbr.conf > /dev/null
 
-          # --- بهینه‌سازی کرنل برای کمترین لیتنسی و استریم سریع ---
+          # --- بهینه‌سازی کرنل برای حداقل لیتنسی و بافر استریم ---
           sudo tee /etc/sysctl.d/99-prxcore-optimize.conf > /dev/null <<'SYSCTL'
-          # === BBR Congestion Control ===
           net.core.default_qdisc = fq
           net.ipv4.tcp_congestion_control = bbr
-
-          # === TCP Fast Open ===
           net.ipv4.tcp_fastopen = 3
           net.ipv4.tcp_slow_start_after_idle = 0
 
-          # === بافرهای شبکه بهینه ===
           net.core.rmem_default = 2097152
           net.core.rmem_max = 67108864
           net.core.wmem_default = 2097152
@@ -48,19 +44,16 @@ jobs:
           net.core.somaxconn = 65535
           net.core.netdev_max_backlog = 250000
 
-          # === بازیابی سریع پکت‌لاس ===
           net.ipv4.tcp_sack = 1
           net.ipv4.tcp_dsack = 1
           net.ipv4.tcp_timestamps = 1
           net.ipv4.tcp_no_metrics_save = 1
           net.ipv4.tcp_frto = 2
 
-          # === آزادسازی سوکت‌ها ===
           net.ipv4.tcp_fin_timeout = 15
           net.ipv4.tcp_tw_reuse = 1
           net.ipv4.tcp_max_tw_buckets = 2000000
 
-          # === TCP Keepalive بهینه ===
           net.ipv4.tcp_keepalive_time = 30
           net.ipv4.tcp_keepalive_intvl = 5
           net.ipv4.tcp_keepalive_probes = 5
@@ -76,7 +69,7 @@ jobs:
           SYSCTL
 
           sudo sysctl --system > /dev/null 2>&1
-          echo "✅ بهینه‌سازی کرنل با موفقیت اعمال شد."
+          echo "✅ بهینه‌سازی کرنل اعمال شد."
 
       - name: 2. Install Packages & CLI Tools
         run: |
@@ -93,30 +86,32 @@ jobs:
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-          echo "✅ پکیج‌ها و ابزارهای موردنیاز نصب شدند."
+          echo "✅ پکیج‌های پایه با موفقیت نصب شدند."
 
-      - name: 3. Launch Ultra-Fast Kasm Chromium Container
+      - name: 3. Launch Ultra-Fast Cloud Chromium Container (KasmVNC Engine)
         run: |
-          echo "🚀 در حال دریافت و اجرای کانتینر مرورگر Kasm..."
+          echo "🚀 در حال راه‌اندازی مرورگر ابری..."
           
-          # اجرای مرورگر با رزولوشن 1080p، پشتیبانی صدا و بافر حافظه مشترک 4 گیگابایت
+          # اجرای کانتینر مرورگر کرومیوم LinuxServer بر پایه KasmVNC
           sudo docker run -d \
-            --name kasm_chrome \
+            --name cloud_browser \
             --restart always \
-            -p 6901:6901 \
-            -e VNC_PW="$PRX_USER_PASS" \
-            -e VNC_RESOLUTION="1920x1080" \
-            -e VNC_VIEW_ONLY=0 \
-            -e KASM_FORCE_AUDIO=1 \
-            -e LC_ALL="C.UTF-8" \
+            -p 3000:3000 \
+            -e PUID=1000 \
+            -e PGID=1000 \
+            -e TZ=Etc/UTC \
+            -e CUSTOM_USER=prxcore \
+            -e PASSWORD="$PRX_USER_PASS" \
+            -e CHROME_CLI="--no-sandbox --disable-dev-shm-usage" \
             --shm-size=4g \
-            kasmweb/chrome:1.15.0
+            --security-opt seccomp=unconfined \
+            lscr.io/linuxserver/chromium:latest
 
-          # انتظار برای راه‌اندازی وب‌سرور داخلی Kasm
-          echo "⏳ در حال آماده‌سازی مرورگر ابری..."
+          # انتظار برای آماده شدن وب‌سرور داخلی مرورگر
+          echo "⏳ در حال بررسی اجرای سرویس مرورگر..."
           for i in {1..30}; do
-            if curl -k -s https://127.0.0.1:6901 > /dev/null; then
-              echo "✅ مرورگر ابری Kasm با موفقیت بالا آمد."
+            if curl -s http://127.0.0.1:3000 > /dev/null; then
+              echo "✅ مرورگر ابری با موفقیت فعال شد."
               break
             fi
             sleep 2
@@ -200,7 +195,7 @@ jobs:
           sleep 2
 
           if sudo systemctl is-active --quiet xray; then
-            echo "✅ سرویس Xray با موفقیت راه‌اندازی شد."
+            echo "✅ سرویس Xray با موفقیت اجرا شد."
           else
             echo "❌ خطا در اجرای Xray!"
             exit 1
@@ -230,7 +225,6 @@ jobs:
               keepalive_timeout 120;
               keepalive_requests 100000;
 
-              # تنظیم استاندارد ارتقای پروتکل به وب‌سوکت
               map $http_upgrade $connection_upgrade {
                   default upgrade;
                   ''      close;
@@ -244,8 +238,8 @@ jobs:
           MAIN
 
           cat <<'SITE' | sudo tee /etc/nginx/sites-available/default
-          upstream kasm_backend {
-              server 127.0.0.1:6901;
+          upstream browser_backend {
+              server 127.0.0.1:3000;
               keepalive 128;
           }
 
@@ -259,9 +253,9 @@ jobs:
               server_name _;
               client_max_body_size 0;
 
-              # === مرورگر ابری Kasm (60fps KasmVNC / WebAudio) ===
+              # === مرورگر ابری فوق‌سریع (KasmVNC 60fps / WebAudio) ===
               location / {
-                  proxy_pass https://kasm_backend;
+                  proxy_pass http://browser_backend;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection $connection_upgrade;
@@ -269,8 +263,10 @@ jobs:
                   proxy_set_header X-Real-IP $remote_addr;
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto https;
-                  proxy_ssl_verify off;
+                  proxy_set_header Authorization $http_authorization;
+                  proxy_pass_header Authorization;
 
+                  # حذف کامل بافر برای کاهش تأخیر ماوس و کلیدها
                   proxy_buffering off;
                   proxy_request_buffering off;
                   tcp_nodelay on;
@@ -280,7 +276,7 @@ jobs:
                   proxy_send_timeout 86400s;
               }
 
-              # === مسیر اتصال اختصاصی VLESS WS ===
+              # === مسیر پروکسی اختصاصی VLESS WS ===
               location /prx-stream {
                   proxy_redirect off;
                   proxy_pass http://xray_backend;
@@ -302,7 +298,7 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === بررسی وضعیت سلامت سرور ===
+              # === وضعیت سلامت سرور ===
               location /health {
                   access_log off;
                   default_type application/json;
@@ -313,7 +309,7 @@ jobs:
 
           sudo nginx -t
           sudo systemctl restart nginx
-          echo "✅ Nginx به درستی پیکربندی و راه‌اندازی شد."
+          echo "✅ Nginx با موفقیت پیکربندی شد."
 
       - name: 6. Launch Smart Cloudflare Tunnel & Dynamic Monitor
         run: |
@@ -398,7 +394,7 @@ jobs:
           MONITOR
           sudo chmod +x /usr/local/bin/tunnel_monitor.sh
           sudo nohup /usr/local/bin/tunnel_monitor.sh > /dev/null 2>&1 &
-          echo "✅ مانیتور هوشمند سوئیچ پروتکل فعال شد."
+          echo "✅ مانیتور هوشمند فعال شد."
 
       - name: 7. Output Access Credentials & 6-Hour Keep Alive
         run: |
@@ -410,7 +406,7 @@ jobs:
           echo "╠══════════════════════════════════════════════════════════════════════════╣"
           echo "║                                                                          ║"
           printf "║  🌐 Cloud Browser (Kasm 60fps): https://%s\n" "$PRX_DOMAIN"
-          echo "║  👤 Username:                   kasm_user                                ║"
+          echo "║  👤 Username:                   prxcore                                  ║"
           echo "║  🔐 Password:                   [PRX_USER_PASS Secret]                   ║"
           echo "║                                                                          ║"
           echo "╠══════════════════════════════════════════════════════════════════════════╣"
@@ -419,7 +415,7 @@ jobs:
           echo ""
           echo "$VLESS_LINK"
           echo ""
-          echo "⏱️ سرور به مدت ۶ ساعت با بالاترین توان در دسترس شماست..."
+          echo "⏱️ سرور به مدت ۶ ساعت با حداکثر توان فعال است..."
           echo "=========================================================================="
 
           for i in $(seq 1 360); do
