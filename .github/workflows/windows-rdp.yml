@@ -1,4 +1,4 @@
-name: prxcore Beast Workstation & Ultra Low-Latency Remote Browser (KasmVNC + Xray)
+name: prxcore Dedicated Google Flow Workstation (Kasm WebRTC + Xray)
 
 on:
   workflow_dispatch:
@@ -24,35 +24,24 @@ jobs:
           restore-keys: |
             kasm-profile-
 
-      - name: 1. Validate Secrets & Deep Kernel Network Tuning (BBR + FastOpen + Low-Latency TCP)
+      # === ۱. بهینه‌سازی تهاجمی شبکه کرنل لینوکس (BBR + FastOpen + Zero Bufferbloat) ===
+      - name: 1. Validate Secrets & Deep Kernel Network Tuning
         run: |
-          # --- اعتبارسنجی سکرت‌ها ---
           if [ -z "$CF_TOKEN" ] || [ -z "$PRX_DOMAIN" ] || [ -z "$PRX_UUID" ] || [ -z "$PRX_USER_PASS" ]; then
             echo "❌ خطا: لطفاً مطمئن شوید تمام سکرت‌ها (CF_TUNNEL_TOKEN, PRX_DOMAIN, PRX_UUID, PRX_USER_PASS) در تنظیمات گیت‌هاب تعریف شده‌اند."
             exit 1
           fi
           echo "✅ تمام سکرت‌ها تأیید شدند."
 
-          # --- فعال‌سازی ماژول BBR در هسته لینوکس ---
           sudo modprobe tcp_bbr 2>/dev/null || true
           echo "tcp_bbr" | sudo tee -a /etc/modules-load.d/bbr.conf > /dev/null
 
-          # --- بهینه‌سازی تهاجمی کرنل برای کاهش لیتنسی و بهره‌برداری از سخت‌افزار و پهنای باند غول ---
           sudo tee /etc/sysctl.d/99-prxcore-optimize.conf > /dev/null <<'SYSCTL'
-          # === BBR Congestion Control ===
           net.core.default_qdisc = fq
           net.ipv4.tcp_congestion_control = bbr
-
-          # === TCP Fast Open همزمان برای ارسال و دریافت سریع دسکتاپ ===
           net.ipv4.tcp_fastopen = 3
-
-          # === حذف وقفه Slow Start پس از بی‌کاری سوکت ===
           net.ipv4.tcp_slow_start_after_idle = 0
-
-          # === کاهش فوق‌العاده Bufferbloat و لیتنسی ریموت دسکتاپ (فوری‌ترین پاسخ به موس/کیبورد) ===
           net.ipv4.tcp_notsent_lowat = 16384
-
-          # === بافرهای غول‌پیکر شبکه (۶۴ مگابایت) برای نرخ فریم و کیفیت تصویر ۶۰fps ===
           net.core.rmem_default = 2097152
           net.core.rmem_max = 67108864
           net.core.wmem_default = 2097152
@@ -62,8 +51,6 @@ jobs:
           net.core.somaxconn = 65535
           net.core.netdev_max_backlog = 250000
           net.core.optmem_max = 65536
-
-          # === تنظیمات Window Scaling و ریکاوری بلادرنگ پکت‌ها ===
           net.ipv4.tcp_window_scaling = 1
           net.ipv4.tcp_adv_win_scale = -2
           net.ipv4.tcp_sack = 1
@@ -74,20 +61,14 @@ jobs:
           net.ipv4.tcp_fin_timeout = 15
           net.ipv4.tcp_tw_reuse = 1
           net.ipv4.tcp_max_tw_buckets = 2000000
-
-          # === Keepalive بهینه (تست سلامت سریع کانکشن) ===
           net.ipv4.tcp_keepalive_time = 45
           net.ipv4.tcp_keepalive_intvl = 5
           net.ipv4.tcp_keepalive_probes = 6
-
-          # === امنیت و صف ورودی بالا ===
           net.ipv4.tcp_syncookies = 1
           net.ipv4.tcp_max_syn_backlog = 65535
           net.ipv4.tcp_mtu_probing = 1
           net.ipv4.ip_local_port_range = 1024 65535
           net.ipv4.tcp_ecn = 0
-
-          # === ARP و غیرفعال‌سازی IPv6 برای مسیردهی مستقیم ===
           net.ipv4.neigh.default.gc_thresh1 = 1024
           net.ipv4.neigh.default.gc_thresh2 = 4096
           net.ipv4.neigh.default.gc_thresh3 = 8192
@@ -96,9 +77,10 @@ jobs:
           SYSCTL
 
           sudo sysctl --system > /dev/null 2>&1
-          echo "✅ تنظیمات کرنل، BBR و کاهش لیتنسی اعمال شدند."
+          echo "✅ بهینه‌سازی کرنل و BBR اعمال شد."
 
-      - name: 2. Setup Secure User, Dependencies & Deploy Extreme Kasm Chromium
+      # === ۲. آماده‌سازی نیازمندی‌ها و اجرای Chromium در حالت اختصاصی Google Flow App ===
+      - name: 2. Setup Secure User, Dependencies & Deploy Google Flow Dedicated App
         run: |
           sudo useradd -m -s /bin/bash prxcore
           echo "prxcore:$PRX_USER_PASS" | sudo chpasswd
@@ -109,22 +91,20 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             neofetch htop tmux curl wget nginx qrencode jq -qq
 
-          # دانلود ttyd
           sudo wget -q -nc https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64 -O /usr/local/bin/ttyd
           sudo chmod +x /usr/local/bin/ttyd
 
-          # دانلود cloudflared
           sudo wget -q -nc https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -O /usr/local/bin/cloudflared
           sudo chmod +x /usr/local/bin/cloudflared
 
-          # آماده‌سازی دایرکتوری پایدار پروفایل و پاکسازی قفل‌های احتمالی
+          # آماده‌سازی دایرکتوری پایدار و پاکسازی فایل‌های قفل موقت
           mkdir -p /home/runner/kasm_data
           sudo rm -f /home/runner/kasm_data/Singleton* \
                       /home/runner/kasm_data/.config/chromium/Singleton* \
                       /home/runner/kasm_data/.config/chromium/Default/Singleton* 2>/dev/null || true
           sudo chown -R 1000:1000 /home/runner/kasm_data
 
-          # اجرای کانتینر ریموت بروزر با مانت دایرکتوری پایدار
+          # استقرار محیط به صورت اختصاصی با پرچم --app برای Google Flow
           sudo docker run -d \
             --name=kasm-chrome \
             -p 127.0.0.1:3000:3000 \
@@ -137,12 +117,13 @@ jobs:
             -e LC_ALL=en_US.UTF-8 \
             -e CUSTOM_USER=prxcore \
             -e PASSWORD="$PRX_USER_PASS" \
-            -e CHROME_CLI="--no-sandbox --disable-dev-shm-usage --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --num-raster-threads=8 --enable-accelerated-2d-canvas --enable-features=CanvasOopRasterization" \
+            -e CHROME_CLI="--app=https://labs.google/fx/tools/flow --start-maximized --no-sandbox --disable-dev-shm-usage --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-renderer-backgrounding --num-raster-threads=8 --enable-accelerated-2d-canvas --enable-features=CanvasOopRasterization" \
             --restart unless-stopped \
             lscr.io/linuxserver/chromium:latest
 
-          echo "✅ تمام پیش‌نیازها و کانتینر ریموت بروزر با موفقیت مستقر شدند."
+          echo "✅ محیط اختصاصی Google Flow با موفقیت مستقر شد."
 
+      # === ۳. نصب و کانفیگ Xray-Core (VLESS WebSocket) ===
       - name: 3. Install & Configure Xray-Core (Fully Optimized VLESS WS)
         run: |
           sudo bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install
@@ -277,7 +258,8 @@ jobs:
             exit 1
           fi
 
-      - name: 4. Configure Nginx Ultra Multiplexer (No-Lag WebSocket & Map Handling)
+      # === ۴. کانفیگ Nginx بدون بافرینگ و تقسیم مسیرها ===
+      - name: 4. Configure Nginx Ultra Multiplexer
         run: |
           cat <<'MAIN' | sudo tee /etc/nginx/nginx.conf
           user www-data;
@@ -292,7 +274,6 @@ jobs:
           }
 
           http {
-              # === تعریف نقشه داینامیک وب‌سوکت برای لود بدون نقص فایل‌های استاتیک و استریم ===
               map $http_upgrade $connection_upgrade {
                   default upgrade;
                   '' close;
@@ -339,7 +320,6 @@ jobs:
               server_name _;
               client_max_body_size 0;
 
-              # === ۱. مسیر پروکسی فیلترشکن VLESS WS (بدون لاگ دیسک) ===
               location /prx-stream {
                   access_log off;
                   proxy_redirect off;
@@ -360,7 +340,6 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === ۲. مسیر وب‌ترمینال لینوکس (ttyd) ===
               location ^~ /terminal/ {
                   proxy_pass http://ttyd_backend;
                   proxy_http_version 1.1;
@@ -377,7 +356,6 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === ۳. مسیر اصلی: ریموت بروزر پرسرعت Kasm Chromium (بلادرنگ و بدون تاخیر) ===
               location / {
                   proxy_pass http://kasm_backend;
                   proxy_http_version 1.1;
@@ -388,7 +366,6 @@ jobs:
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto $scheme;
 
-                  # خاموش کردن بافرینگ برای دریافت آنی فریم‌های تصویر و موس
                   proxy_buffering off;
                   proxy_request_buffering off;
                   proxy_connect_timeout 2s;
@@ -397,7 +374,6 @@ jobs:
                   proxy_socket_keepalive on;
               }
 
-              # === ۴. وضعیت سلامت سرور ===
               location /health {
                   access_log off;
                   default_type application/json;
@@ -409,15 +385,15 @@ jobs:
           sudo nginx -t
           if [ $? -eq 0 ]; then
             sudo systemctl restart nginx
-            echo "✅ Nginx مالتی‌پلکسر با بهینه‌سازی جدید اجرا شد."
+            echo "✅ Nginx مالتی‌پلکسر فعال شد."
           else
             echo "❌ خطا در کانفیگ Nginx!"
             exit 1
           fi
 
-      - name: 5. Launch Services & Smart Cloudflare Tunnel (Advanced Auto-Fallback)
+      # === ۵. اجرای سرویس‌ها و کلودفلر تونل به همراه مانیتور هوشمند ===
+      - name: 5. Launch Services & Smart Cloudflare Tunnel
         run: |
-          # اجرای ttyd روی پورت 7681 با پیشوند مسیر /terminal
           sudo nohup /usr/local/bin/ttyd \
             -c "prxcore:$PRX_USER_PASS" \
             -W \
@@ -429,7 +405,6 @@ jobs:
             tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # شروع تونل با پروتکل QUIC
           CURRENT_PROTO="quic"
           echo "$CURRENT_PROTO" > /tmp/cf_proto.txt
 
@@ -447,7 +422,7 @@ jobs:
           if ps -p $CF_PID > /dev/null 2>&1; then
             echo "✅ Cloudflare Tunnel با پروتکل $CURRENT_PROTO اجرا شد (PID: $CF_PID)"
           else
-            echo "⚠️ QUIC ناموفق — فالبک فوری به HTTP/2..."
+            echo "⚠️ فالبک فوری به HTTP/2..."
             CURRENT_PROTO="http2"
             echo "$CURRENT_PROTO" > /tmp/cf_proto.txt
             sudo nohup /usr/local/bin/cloudflared tunnel \
@@ -462,7 +437,6 @@ jobs:
             echo "✅ Cloudflare Tunnel با پروتکل $CURRENT_PROTO اجرا شد."
           fi
 
-          # مانیتورینگ هوشمند پایداری تونل
           echo "$CF_TOKEN" > /tmp/.cf_token
           chmod 600 /tmp/.cf_token
 
@@ -541,31 +515,29 @@ jobs:
           MONITOR
           sudo chmod +x /usr/local/bin/tunnel_monitor.sh
           sudo nohup /usr/local/bin/tunnel_monitor.sh > /dev/null 2>&1 &
-          echo "✅ مانیتور هوشمند تونل فعال شد."
+          echo "✅ مانیتورینگ هوشمند پایداری تونل آغاز شد."
 
+      # === ۶. نمایش اطلاعات ورود و حلقه زنده نگه داشتن سرور ===
       - name: 6. Generate Connection Info & 6-Hour Keep Alive
         run: |
           VLESS_LINK="vless://$PRX_UUID@$PRX_DOMAIN:443?path=%2Fprx-stream&security=tls&encryption=none&type=ws&sni=$PRX_DOMAIN&host=$PRX_DOMAIN&alpn=h2%2Chttp%2F1.1&fp=chrome#PRX-Ultra"
 
           echo ""
           echo "╔══════════════════════════════════════════════════════════╗"
-          echo "║   🎉 ULTRA LOW-LATENCY WORKSTATION & BROWSER ACTIVE!     ║"
+          echo "║    🚀 DEDICATED GOOGLE FLOW APP WORKSTATION ACTIVE!      ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║                                                          ║"
-          printf "║  🚀 Remote Browser: https://%s\n" "$PRX_DOMAIN"
-          printf "║  💻 Web Terminal:   https://%s/terminal/\n" "$PRX_DOMAIN"
-          echo "║  🔐 Login Username: prxcore                              ║"
-          echo "║  🔐 Password:       [Defined in PRX_USER_PASS Secret]  ║"
+          printf "║  🎯 Google Flow App: https://%s\n" "$PRX_DOMAIN"
+          printf "║  💻 Web Terminal:    https://%s/terminal/\n" "$PRX_DOMAIN"
+          echo "║  🔐 Username:        prxcore                             ║"
+          echo "║  🔐 Password:        [Defined in PRX_USER_PASS Secret] ║"
           echo "║                                                          ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║  ⚡ Ultra Optimizations Applied:                        ║"
-          echo "║    ✅ 8GB Shared RAM (shm) + Host IPC Mode              ║"
-          echo "║    ✅ 8 Parallel Raster CPU Threads (Instant Render)    ║"
-          echo "║    ✅ TCP_NOTSENT_LOWAT (Zero Bufferbloat / Ultra Low RTT)║"
-          echo "║    ✅ BBR Congestion Control + 64MB Massive Buffers     ║"
-          echo "║    ✅ Nginx Dynamic Map (Clean HTTP/WebSocket Split)    ║"
-          echo "║    ✅ Protected Kasm Authentication (prxcore)          ║"
+          echo "║    ✅ Native App Mode (--app=Google Flow)                ║"
+          echo "║    ✅ Zero Distraction & Optimized Window Layout        ║"
           echo "║    ✅ Cloud Session Persistence (Auto Cookies/Logins)   ║"
+          echo "║    ✅ Active Background VPN Extension Connection        ║"
           echo "╠══════════════════════════════════════════════════════════╣"
           echo "║  🚀 VLESS Connection Link:                              ║"
           echo "╚══════════════════════════════════════════════════════════╝"
@@ -589,14 +561,14 @@ jobs:
           done
           echo "⏰ ۶ ساعت تمام شد. سرور خاموش می‌شود."
 
-      # === ۷. متوقف کردن ایمن کانتینر برای ذخیره نهایی کوکی‌ها و پاکسازی موقت‌ها ===
+      # === ۷. توقف ایمن کانتینر برای ذخیره نهایی کوکی‌ها و پاکسازی موقت‌ها ===
       - name: 7. Gracefully Stop Browser & Clean Sockets
         if: always()
         run: |
           echo "⏹️ متوقف کردن ایمن کانتینر برای ثبت نهایی کوکی‌ها..."
           sudo docker stop kasm-chrome -t 10 2>/dev/null || true
           
-          # حذف فایل‌های موقت، قفل‌ها و سوکت‌های لینوکسی که مانع کش شدن می‌شوند
+          # پاکسازی فایل‌های موقت، قفل‌ها و سوکت‌های لینوکسی
           sudo rm -rf /home/runner/kasm_data/.cache \
                       /home/runner/kasm_data/Singleton* \
                       /home/runner/kasm_data/.config/chromium/Singleton* \
@@ -604,12 +576,12 @@ jobs:
                       /home/runner/kasm_data/.X11-unix \
                       /home/runner/kasm_data/tmp 2>/dev/null || true
           
-          # آزادسازی دسترسی کامل جهت ساخت آرشیو کش
+          # آزادسازی دسترسی کامل برای ساخت آرشیو کش
           sudo chown -R runner:docker /home/runner/kasm_data
           sudo chmod -R 777 /home/runner/kasm_data
           echo "✅ داده‌های پروفایل با موفقیت آماده ذخیره‌سازی شدند."
 
-      # === ۸. ذخیره‌سازی آرشیو سشن‌ها و کوکی‌ها در گیت‌هاب ===
+      # === ۸. ذخیره‌سازی سشن‌ها، کوکی‌ها و وی‌پی‌ان در کش گیت‌هاب ===
       - name: 8. Save Persistent Browser Profile & Cookies
         if: always()
         uses: actions/cache/save@v4
