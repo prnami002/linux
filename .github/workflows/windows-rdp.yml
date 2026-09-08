@@ -415,7 +415,7 @@ jobs:
             exit 1
           fi
 
-      - name: 5. Launch Services & Cloudflare Tunnel (QUIC / UDP Protocol)
+      - name: 5. Launch Services & Cloudflare Tunnel (Stable HTTP/2 Engine)
         run: |
           # اجرای ttyd روی پورت 7681 با پیشوند مسیر /terminal
           sudo nohup /usr/local/bin/ttyd \
@@ -429,12 +429,12 @@ jobs:
             tmux new-session -A -s prxcore_workspace > /tmp/ttyd.log 2>&1 &
           sleep 2
 
-          # اجرای دائمی کلودفلرد بر بستر UDP (پروتکل QUIC) با سوپروایزر ساده خودکار
+          # اجرای پایدار کلودفلرد با پروتکل http2 و سوپروایزر سبک
           cat <<'LAUNCHER' | sudo tee /usr/local/bin/run_cloudflared.sh > /dev/null
           #!/bin/bash
           while true; do
             /usr/local/bin/cloudflared tunnel \
-              --protocol quic \
+              --protocol http2 \
               --url http://127.0.0.1:8000 \
               --no-autoupdate \
               --edge-ip-version 4 \
@@ -450,7 +450,7 @@ jobs:
           sleep 6
 
           if pgrep -f "cloudflared" > /dev/null 2>&1; then
-            echo "✅ Cloudflare Tunnel با پروتکل QUIC (UDP) با موفقیت اجرا شد."
+            echo "✅ Cloudflare Tunnel با پروتکل HTTP/2 با موفقیت اجرا شد."
           else
             echo "❌ خطا در استارت اولیه کلودفلرد:"
             tail -n 20 /tmp/cf_tunnel.log
@@ -495,9 +495,9 @@ jobs:
               CF_UP=$(pgrep -c -f "cloudflared" 2>/dev/null || echo "0")
               XRAY_UP=$(pgrep -c -f "xray" 2>/dev/null || echo "0")
               KASM_UP=$(sudo docker inspect -f '{{.State.Running}}' kasm-chrome 2>/dev/null || echo "false")
-              echo "[$i/360] 📊 Status: Proto=QUIC(UDP) | CF=$CF_UP | Xray=$XRAY_UP | Kasm=$KASM_UP"
+              echo "[$i/360] 📊 Status: Proto=HTTP/2 | CF=$CF_UP | Xray=$XRAY_UP | Kasm=$KASM_UP"
             else
-              echo "[$i/360] 🟢 Running on $PRX_DOMAIN (UDP/QUIC)"
+              echo "[$i/360] 🟢 Running on $PRX_DOMAIN (HTTP/2 Stable)"
             fi
           done
           echo "⏰ ۶ ساعت تمام شد. سرور خاموش می‌شود."
