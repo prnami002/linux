@@ -186,7 +186,7 @@ jobs:
                     "headers": {
                       "Host": "$PRX_DOMAIN"
                     },
-                    "heartbeatPeriod": 30
+                    "heartbeatPeriod": 15
                   },
                   "sockopt": {
                     "mark": 255,
@@ -339,7 +339,7 @@ jobs:
               server_name _;
               client_max_body_size 0;
 
-              # === ۱. مسیر پروکسی فیلترشکن VLESS WS (بدون لاگ دیسک) ===
+              # === ۱. مسیر پروکسی فیلترشکن VLESS WS (تخلیه آنی بافر استریم کلمات) ===
               location /prx-stream {
                   access_log off;
                   proxy_redirect off;
@@ -352,9 +352,12 @@ jobs:
                   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                   proxy_set_header X-Forwarded-Proto $scheme;
 
+                  # تنظیمات ضد فریز استریم هوش مصنوعی و تخلیه فوری بسته‌ها
                   proxy_buffering off;
                   proxy_request_buffering off;
-                  proxy_connect_timeout 2s;
+                  proxy_cache off;
+                  chunked_transfer_encoding off;
+                  tcp_nodelay on;
                   proxy_read_timeout 86400s;
                   proxy_send_timeout 86400s;
                   proxy_socket_keepalive on;
